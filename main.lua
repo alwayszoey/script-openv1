@@ -1,10 +1,9 @@
 -- ============================================================
 -- UNIVERSAL HUB - v1.0.0
--- MacLib UI + Getkey Verification + Universal
+-- Getkey UI + MacLib + Full Features
 -- ============================================================
 
-local MacLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/maclib.lua"))()
-
+--// Services
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -17,16 +16,18 @@ local HttpService      = game:GetService("HttpService")
 local RbxAnalytics     = game:GetService("RbxAnalyticsService")
 local LocalPlayer      = Players.LocalPlayer
 
-local GETKEY_API       = "https://getkeyxcl.vercel.app"
-local VERIFY_ENDPOINT  = GETKEY_API .. "/api/key/verify"
-local STORAGE_KEY      = "universalhub_key_v1"
-
+--// Config
 local Config = {
     Title = "UNIVERSAL HUB",
     Subtitle = "v1.0.0 • Verified Access",
-    Version = "v1.0.0"
+    Version = "v1.0.0",
+    ApiUrl = "https://getkeyxcl.vercel.app",
+    StorageKey = "universalhub_key_v1",
+    MacLibUrl = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/maclib.lua",
+    GetkeyUiUrl = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/getkey-ui.lua"
 }
 
+--// State
 local State = {
     BypassEnabled=false, BypassRange=500, RemoveCollision=false, AutoEnterLocked=false,
     SpeedEnabled=false, SpeedValue=16, MaxSpeed=250,
@@ -38,8 +39,8 @@ local State = {
 
 local AntiBan = { tickCounter = 0, currentRampSpeed = 16 }
 
--- CLEANUP
-for _, name in ipairs({"UniversalHub", "UniversalHubLoading", "UniversalHubVerify", "UniversalHubToggle", "UniversalHubHUD"}) do
+--// Cleanup old GUIs
+for _, name in ipairs({"UniversalHub", "UniversalHubLoading", "GetkeyUI", "UniversalHubToggle", "UniversalHubHUD"}) do
     pcall(function()
         local o = CoreGui:FindFirstChild(name)
         if o then o:Destroy() end
@@ -50,7 +51,7 @@ for _, name in ipairs({"UniversalHub", "UniversalHubLoading", "UniversalHubVerif
     end)
 end
 
--- HWID
+--// HWID
 local function getHWID()
     local ok, id = pcall(function()
         return RbxAnalytics:GetClientId()
@@ -61,13 +62,13 @@ end
 
 local HWID = getHWID()
 
--- VERIFY API
+--// Verify API
 local function verifyKey(key)
     local payload = HttpService:JSONEncode({ key = key, hwid = HWID })
 
     local ok, response = pcall(function()
         return HttpService:RequestAsync({
-            Url = VERIFY_ENDPOINT,
+            Url = Config.ApiUrl .. "/api/key/verify",
             Method = "POST",
             Headers = { ["Content-Type"] = "application/json" },
             Body = payload
@@ -91,57 +92,58 @@ local function verifyKey(key)
     return false, decoded.reason or "invalid"
 end
 
--- LOADING SCREEN
-local LoadingGui = Instance.new("ScreenGui")
-LoadingGui.Name = "UniversalHubLoading"
-LoadingGui.ResetOnSpawn = false
-LoadingGui.IgnoreGuiInset = true
-LoadingGui.DisplayOrder = 1000
-pcall(function() LoadingGui.Parent = CoreGui end)
-if not LoadingGui.Parent then LoadingGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+--// Loading Screen
+local function showLoadingScreen()
+    local LoadingGui = Instance.new("ScreenGui")
+    LoadingGui.Name = "UniversalHubLoading"
+    LoadingGui.ResetOnSpawn = false
+    LoadingGui.IgnoreGuiInset = true
+    LoadingGui.DisplayOrder = 1000
+    pcall(function() LoadingGui.Parent = CoreGui end)
+    if not LoadingGui.Parent then LoadingGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
-local LF = Instance.new("Frame")
-LF.Size = UDim2.new(0, 340, 0, 180)
-LF.Position = UDim2.new(0.5, -170, 0.5, -90)
-LF.BackgroundColor3 = Color3.fromRGB(12, 12, 14)
-LF.BorderSizePixel = 0
-LF.Parent = LoadingGui
-local LFC = Instance.new("UICorner") LFC.CornerRadius = UDim.new(0, 14) LFC.Parent = LF
-local LFS = Instance.new("UIStroke") LFS.Color = Color3.fromRGB(255, 35, 45) LFS.Thickness = 1.5 LFS.Parent = LF
+    local LF = Instance.new("Frame")
+    LF.Size = UDim2.new(0, 340, 0, 180)
+    LF.Position = UDim2.new(0.5, -170, 0.5, -90)
+    LF.BackgroundColor3 = Color3.fromRGB(12, 12, 14)
+    LF.BorderSizePixel = 0
+    LF.Parent = LoadingGui
+    local LFC = Instance.new("UICorner") LFC.CornerRadius = UDim.new(0, 14) LFC.Parent = LF
+    local LFS = Instance.new("UIStroke") LFS.Color = Color3.fromRGB(88, 132, 255) LFS.Thickness = 1.5 LFS.Parent = LF
 
-local LL = Instance.new("TextLabel")
-LL.Size = UDim2.new(1, 0, 0, 40); LL.Position = UDim2.new(0, 0, 0, 20)
-LL.BackgroundTransparency = 1; LL.Text = Config.Title
-LL.TextColor3 = Color3.fromRGB(255, 35, 45); LL.TextSize = 24; LL.Font = Enum.Font.GothamBlack; LL.Parent = LF
+    local LL = Instance.new("TextLabel")
+    LL.Size = UDim2.new(1, 0, 0, 40); LL.Position = UDim2.new(0, 0, 0, 20)
+    LL.BackgroundTransparency = 1; LL.Text = Config.Title
+    LL.TextColor3 = Color3.fromRGB(88, 132, 255); LL.TextSize = 24; LL.Font = Enum.Font.GothamBlack; LL.Parent = LF
 
-local LV = Instance.new("TextLabel")
-LV.Size = UDim2.new(1, 0, 0, 14); LV.Position = UDim2.new(0, 0, 0, 58)
-LV.BackgroundTransparency = 1; LV.Text = Config.Version
-LV.TextColor3 = Color3.fromRGB(110, 110, 125); LV.TextSize = 10; LV.Font = Enum.Font.Gotham; LV.Parent = LF
+    local LV = Instance.new("TextLabel")
+    LV.Size = UDim2.new(1, 0, 0, 14); LV.Position = UDim2.new(0, 0, 0, 58)
+    LV.BackgroundTransparency = 1; LV.Text = Config.Version
+    LV.TextColor3 = Color3.fromRGB(110, 110, 125); LV.TextSize = 10; LV.Font = Enum.Font.Gotham; LV.Parent = LF
 
-local LBB = Instance.new("Frame")
-LBB.Size = UDim2.new(0, 260, 0, 6); LBB.Position = UDim2.new(0.5, -130, 0, 100)
-LBB.BackgroundColor3 = Color3.fromRGB(45, 45, 55); LBB.BorderSizePixel = 0; LBB.Parent = LF
-local LBBC = Instance.new("UICorner") LBBC.CornerRadius = UDim.new(1, 0) LBBC.Parent = LBB
+    local LBB = Instance.new("Frame")
+    LBB.Size = UDim2.new(0, 260, 0, 6); LBB.Position = UDim2.new(0.5, -130, 0, 100)
+    LBB.BackgroundColor3 = Color3.fromRGB(45, 45, 55); LBB.BorderSizePixel = 0; LBB.Parent = LF
+    local LBBC = Instance.new("UICorner") LBBC.CornerRadius = UDim.new(1, 0) LBBC.Parent = LBB
 
-local LBF = Instance.new("Frame")
-LBF.Size = UDim2.new(0, 0, 1, 0); LBF.BackgroundColor3 = Color3.fromRGB(255, 35, 45)
-LBF.BorderSizePixel = 0; LBF.Parent = LBB
-local LBFC = Instance.new("UICorner") LBFC.CornerRadius = UDim.new(1, 0) LBFC.Parent = LBB
+    local LBF = Instance.new("Frame")
+    LBF.Size = UDim2.new(0, 0, 1, 0); LBF.BackgroundColor3 = Color3.fromRGB(88, 132, 255)
+    LBF.BorderSizePixel = 0; LBF.Parent = LBB
+    local LBFC = Instance.new("UICorner") LBFC.CornerRadius = UDim.new(1, 0) LBFC.Parent = LBB
 
-local LS = Instance.new("TextLabel")
-LS.Size = UDim2.new(1, 0, 0, 14); LS.Position = UDim2.new(0, 0, 0, 120)
-LS.BackgroundTransparency = 1; LS.Text = "Loading..."
-LS.TextColor3 = Color3.fromRGB(160, 160, 175); LS.TextSize = 10; LS.Font = Enum.Font.GothamBold; LS.Parent = LF
+    local LS = Instance.new("TextLabel")
+    LS.Size = UDim2.new(1, 0, 0, 14); LS.Position = UDim2.new(0, 0, 0, 120)
+    LS.BackgroundTransparency = 1; LS.Text = "Loading..."
+    LS.TextColor3 = Color3.fromRGB(160, 160, 175); LS.TextSize = 10; LS.Font = Enum.Font.GothamBold; LS.Parent = LF
 
-task.spawn(function()
-    local steps = {"Loading MacLib...", "Checking updates...", "Preparing UI...", "Ready!"}
+    local steps = {"Loading modules...", "Checking updates...", "Preparing UI...", "Ready!"}
     for i = 1, 4 do
         LS.Text = steps[i]
         TweenService:Create(LBF, TweenInfo.new(0.3), { Size = UDim2.new(i/4, 0, 1, 0) }):Play()
-        task.wait(0.35)
+        task.wait(0.3)
     end
     task.wait(0.2)
+
     for _, obj in ipairs(LF:GetDescendants()) do
         if obj:IsA("TextLabel") then
             TweenService:Create(obj, TweenInfo.new(0.35), {TextTransparency=1}):Play()
@@ -153,219 +155,12 @@ task.spawn(function()
     end
     task.wait(0.45)
     LoadingGui:Destroy()
-end)
-
-task.wait(1.8)
-
--- VERIFY SCREEN
-local function buildVerifyScreen(onSuccess)
-    local VGui = Instance.new("ScreenGui")
-    VGui.Name = "UniversalHubVerify"
-    VGui.ResetOnSpawn = false
-    VGui.IgnoreGuiInset = true
-    VGui.DisplayOrder = 998
-    pcall(function() VGui.Parent = CoreGui end)
-    if not VGui.Parent then VGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-
-    local Bg = Instance.new("Frame")
-    Bg.Size = UDim2.new(1, 0, 1, 0)
-    Bg.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
-    Bg.BackgroundTransparency = 0.15
-    Bg.BorderSizePixel = 0
-    Bg.Parent = VGui
-
-    local Card = Instance.new("Frame")
-    Card.Size = UDim2.new(0, 380, 0, 260)
-    Card.Position = UDim2.new(0.5, -190, 0.5, -130)
-    Card.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    Card.BackgroundTransparency = 0.05
-    Card.BorderSizePixel = 0
-    Card.Active = true
-    Card.Draggable = true
-    Card.Parent = VGui
-    local CardC = Instance.new("UICorner") CardC.CornerRadius = UDim.new(0, 10) CardC.Parent = Card
-    local CardS = Instance.new("UIStroke") CardS.Color = Color3.fromRGB(255, 35, 45) CardS.Thickness = 1.5 CardS.Transparency = 0.3 CardS.Parent = Card
-
-    local Title = Instance.new("TextLabel")
-    Title.Size = UDim2.new(1, -32, 0, 32)
-    Title.Position = UDim2.new(0, 16, 0, 20)
-    Title.BackgroundTransparency = 1
-    Title.Text = Config.Title
-    Title.TextColor3 = Color3.fromRGB(255, 35, 45)
-    Title.TextSize = 22
-    Title.Font = Enum.Font.GothamBlack
-    Title.TextXAlignment = Enum.TextXAlignment.Left
-    Title.Parent = Card
-
-    local Badge = Instance.new("TextLabel")
-    Badge.Size = UDim2.new(0, 60, 0, 20)
-    Badge.Position = UDim2.new(1, -76, 0, 26)
-    Badge.BackgroundColor3 = Color3.fromRGB(46, 26, 26)
-    Badge.Text = "KEY"
-    Badge.TextColor3 = Color3.fromRGB(255, 35, 45)
-    Badge.TextSize = 10
-    Badge.Font = Enum.Font.GothamBold
-    Badge.Parent = Card
-    local BadgeC = Instance.new("UICorner") BadgeC.CornerRadius = UDim.new(1, 0) BadgeC.Parent = Badge
-
-    local Sub = Instance.new("TextLabel")
-    Sub.Size = UDim2.new(1, -32, 0, 16)
-    Sub.Position = UDim2.new(0, 16, 0, 56)
-    Sub.BackgroundTransparency = 1
-    Sub.Text = "Enter your key to continue"
-    Sub.TextColor3 = Color3.fromRGB(160, 160, 175)
-    Sub.TextSize = 12
-    Sub.Font = Enum.Font.Gotham
-    Sub.TextXAlignment = Enum.TextXAlignment.Left
-    Sub.Parent = Card
-
-    local InputFrame = Instance.new("Frame")
-    InputFrame.Size = UDim2.new(1, -32, 0, 42)
-    InputFrame.Position = UDim2.new(0, 16, 0, 92)
-    InputFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
-    InputFrame.BorderSizePixel = 0
-    InputFrame.Parent = Card
-    local IFC = Instance.new("UICorner") IFC.CornerRadius = UDim.new(0, 8) IFC.Parent = InputFrame
-    local IFS = Instance.new("UIStroke") IFS.Color = Color3.fromRGB(60, 60, 72) IFS.Thickness = 1 IFS.Parent = InputFrame
-
-    local Input = Instance.new("TextBox")
-    Input.Size = UDim2.new(1, -24, 1, 0)
-    Input.Position = UDim2.new(0, 12, 0, 0)
-    Input.BackgroundTransparency = 1
-    Input.Text = ""
-    Input.PlaceholderText = "XH-1DAY-XXXX-XXXX-XXXX"
-    Input.TextColor3 = Color3.fromRGB(245, 245, 250)
-    Input.PlaceholderColor3 = Color3.fromRGB(110, 110, 125)
-    Input.TextSize = 13
-    Input.Font = Enum.Font.Code
-    Input.TextXAlignment = Enum.TextXAlignment.Left
-    Input.ClearTextOnFocus = false
-    Input.Parent = InputFrame
-
-    local HWIDLabel = Instance.new("TextLabel")
-    HWIDLabel.Size = UDim2.new(1, -32, 0, 14)
-    HWIDLabel.Position = UDim2.new(0, 16, 0, 140)
-    HWIDLabel.BackgroundTransparency = 1
-    HWIDLabel.Text = "HWID: " .. string.sub(HWID, 1, 24) .. "..."
-    HWIDLabel.TextColor3 = Color3.fromRGB(110, 110, 125)
-    HWIDLabel.TextSize = 9
-    HWIDLabel.Font = Enum.Font.Code
-    HWIDLabel.TextXAlignment = Enum.TextXAlignment.Left
-    HWIDLabel.Parent = Card
-
-    local VerifyBtn = Instance.new("TextButton")
-    VerifyBtn.Size = UDim2.new(1, -32, 0, 42)
-    VerifyBtn.Position = UDim2.new(0, 16, 0, 162)
-    VerifyBtn.BackgroundColor3 = Color3.fromRGB(255, 35, 45)
-    VerifyBtn.Text = "Verify Key"
-    VerifyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    VerifyBtn.TextSize = 14
-    VerifyBtn.Font = Enum.Font.GothamBold
-    VerifyBtn.BorderSizePixel = 0
-    VerifyBtn.AutoButtonColor = false
-    VerifyBtn.Parent = Card
-    local VBC = Instance.new("UICorner") VBC.CornerRadius = UDim.new(0, 8) VBC.Parent = VerifyBtn
-
-    VerifyBtn.MouseEnter:Connect(function()
-        TweenService:Create(VerifyBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(255, 60, 70) }):Play()
-    end)
-    VerifyBtn.MouseLeave:Connect(function()
-        TweenService:Create(VerifyBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(255, 35, 45) }):Play()
-    end)
-
-    local Status = Instance.new("TextLabel")
-    Status.Size = UDim2.new(1, -32, 0, 20)
-    Status.Position = UDim2.new(0, 16, 0, 214)
-    Status.BackgroundTransparency = 1
-    Status.Text = ""
-    Status.TextColor3 = Color3.fromRGB(160, 160, 175)
-    Status.TextSize = 11
-    Status.Font = Enum.Font.Gotham
-    Status.TextXAlignment = Enum.TextXAlignment.Left
-    Status.Parent = Card
-
-    local verifying = false
-
-    local function setStatus(text, color)
-        Status.Text = text
-        Status.TextColor3 = color or Color3.fromRGB(160, 160, 175)
-    end
-
-    local function attemptVerify()
-        if verifying then return end
-        local key = Input.Text
-        if key == "" or #key < 8 then
-            setStatus("Please enter a valid key", Color3.fromRGB(248, 113, 113))
-            return
-        end
-
-        verifying = true
-        VerifyBtn.Text = "Verifying..."
-        VerifyBtn.BackgroundColor3 = Color3.fromRGB(82, 82, 91)
-        setStatus("Contacting server...", Color3.fromRGB(160, 160, 175))
-
-        local valid, reason = verifyKey(key)
-
-        verifying = false
-        VerifyBtn.Text = "Verify Key"
-        VerifyBtn.BackgroundColor3 = Color3.fromRGB(255, 35, 45)
-
-        if valid then
-            setStatus("Key accepted. Welcome.", Color3.fromRGB(60, 220, 110))
-            Input.Text = ""
-
-            TweenService:Create(Card, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
-            TweenService:Create(CardS, TweenInfo.new(0.4), { Transparency = 1 }):Play()
-            for _, obj in ipairs(Card:GetDescendants()) do
-                if obj:IsA("TextLabel") or obj:IsA("TextButton") then
-                    TweenService:Create(obj, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
-                elseif obj:IsA("Frame") then
-                    TweenService:Create(obj, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
-                elseif obj:IsA("UIStroke") then
-                    TweenService:Create(obj, TweenInfo.new(0.4), { Transparency = 1 }):Play()
-                end
-            end
-            TweenService:Create(Bg, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
-
-            task.wait(0.45)
-            VGui:Destroy()
-
-            pcall(function()
-                if writefile and isfolder then
-                    writefile(STORAGE_KEY .. ".txt", key)
-                end
-            end)
-
-            onSuccess()
-        else
-            local msg = "Invalid key"
-            if reason == "expired" then msg = "Key expired"
-            elseif reason == "hwid_mismatch" then msg = "Key bound to another device"
-            elseif reason == "revoked" then msg = "Key revoked"
-            elseif reason == "not_found" then msg = "Key not found"
-            elseif reason == "rate_limited" then msg = "Too many attempts, wait a minute"
-            elseif reason == "network_error" then msg = "Network error"
-            elseif reason == "server_error" then msg = "Server error"
-            elseif reason == "invalid_format" then msg = "Invalid key format"
-            elseif reason == "invalid_hwid" then msg = "Invalid hardware id"
-            end
-            setStatus(msg, Color3.fromRGB(248, 113, 113))
-            TweenService:Create(IFS, TweenInfo.new(0.15), { Color = Color3.fromRGB(248, 113, 113) }):Play()
-            task.wait(0.6)
-            TweenService:Create(IFS, TweenInfo.new(0.15), { Color = Color3.fromRGB(60, 60, 72) }):Play()
-        end
-    end
-
-    VerifyBtn.MouseButton1Click:Connect(attemptVerify)
-    Input.FocusLost:Connect(function(enter)
-        if enter then attemptVerify() end
-    end)
 end
 
--- ============================================================
--- MAIN HUB (MacLib)
--- ============================================================
+--// MacLib Hub
 local function buildMainUI()
+    local MacLib = loadstring(game:HttpGet(Config.MacLibUrl))()
+
     local Window = MacLib:Window({
         Title = Config.Title,
         Subtitle = Config.Subtitle,
@@ -379,41 +174,37 @@ local function buildMainUI()
     MacLib:SetFolder("UniversalHub")
 
     -- Global settings
-    local globalSettings = {
-        BlurToggle = Window:GlobalSetting({
-            Name = "UI Blur",
-            Default = false,
-            Callback = function(bool)
-                Window:SetAcrylicBlurState(bool)
-                Window:Notify({
-                    Title = Config.Title,
-                    Description = (bool and "Enabled" or "Disabled") .. " UI Blur",
-                    Lifetime = 4
-                })
-            end
-        }),
-        NotificationToggler = Window:GlobalSetting({
-            Name = "Notifications",
-            Default = true,
-            Callback = function(bool)
-                Window:SetNotificationsState(bool)
-            end
-        }),
-        ShowUserInfo = Window:GlobalSetting({
-            Name = "Show User Info",
-            Default = true,
-            Callback = function(bool)
-                Window:SetUserInfoState(bool)
-            end
-        }),
-        ShowCoords = Window:GlobalSetting({
-            Name = "Coordinate HUD",
-            Default = true,
-            Callback = function(bool)
-                State.ShowCoords = bool
-            end
-        })
-    }
+    Window:GlobalSetting({
+        Name = "UI Blur",
+        Default = false,
+        Callback = function(bool)
+            Window:SetAcrylicBlurState(bool)
+        end
+    })
+
+    Window:GlobalSetting({
+        Name = "Notifications",
+        Default = true,
+        Callback = function(bool)
+            Window:SetNotificationsState(bool)
+        end
+    })
+
+    Window:GlobalSetting({
+        Name = "Show User Info",
+        Default = true,
+        Callback = function(bool)
+            Window:SetUserInfoState(bool)
+        end
+    })
+
+    Window:GlobalSetting({
+        Name = "Coordinate HUD",
+        Default = true,
+        Callback = function(bool)
+            State.ShowCoords = bool
+        end
+    })
 
     -- Tab group
     local tabGroup = Window:TabGroup()
@@ -426,9 +217,7 @@ local function buildMainUI()
         Settings = tabGroup:Tab({ Name = "Settings", Image = "rbxassetid://108952102602834" }),
     }
 
-    -- ============================================================
-    -- BYPASS FUNCTIONS
-    -- ============================================================
+    --// Bypass functions
     local bypassedGates = {}
     local bypassedCollisions = {}
 
@@ -563,9 +352,7 @@ local function buildMainUI()
         cleanupSpeedInstances()
     end
 
-    -- ============================================================
-    -- TAB: BYPASS
-    -- ============================================================
+    --// TAB: BYPASS
     local bypassSection = tabs.Bypass:Section({ Side = "Left" })
     bypassSection:Header({ Text = "Bypass Gate System" })
 
@@ -634,16 +421,16 @@ local function buildMainUI()
         Callback = function()
             for obj in pairs(bypassedGates) do
                 if obj and obj.Parent then
-                    pcall(function() obj.CanCollide = true; obj.CanTouch = true; obj.CanQuery = true; obj.Transparency = 0 end)
+                    pcall(function()
+                        obj.CanCollide = true; obj.CanTouch = true; obj.CanQuery = true; obj.Transparency = 0
+                    end)
                 end
             end
             bypassedGates = {}; restoreAllCollision()
         end
     })
 
-    -- ============================================================
-    -- TAB: MOVEMENT
-    -- ============================================================
+    --// TAB: MOVEMENT
     local movementSection = tabs.Movement:Section({ Side = "Left" })
     movementSection:Header({ Text = "Speed" })
 
@@ -692,9 +479,7 @@ local function buildMainUI()
     movementSection:Toggle({ Name = "Anti-Void", Default = false, Callback = function(v) State.AntiVoidEnabled = v end })
     movementSection:Toggle({ Name = "Anti-AFK", Default = false, Callback = function(v) State.AntiAfkEnabled = v end })
 
-    -- ============================================================
-    -- TAB: SAVE/TP
-    -- ============================================================
+    --// TAB: SAVE/TP
     local stpSection = tabs.SaveTP:Section({ Side = "Left" })
     stpSection:Header({ Text = "Save Position" })
 
@@ -776,9 +561,7 @@ local function buildMainUI()
         end
     })
 
-    -- ============================================================
-    -- TAB: ANTI-BAN
-    -- ============================================================
+    --// TAB: ANTI-BAN
     local abSection = tabs.AntiBan:Section({ Side = "Left" })
     abSection:Header({ Text = "Anti-Ban Core" })
 
@@ -810,9 +593,7 @@ local function buildMainUI()
         Callback = function() resetCharacterPhysics() end
     })
 
-    -- ============================================================
-    -- TAB: SETTINGS
-    -- ============================================================
+    --// TAB: SETTINGS
     local setSection = tabs.Settings:Section({ Side = "Left" })
     setSection:Header({ Text = "Display" })
 
@@ -841,14 +622,12 @@ local function buildMainUI()
     setSection:Divider()
     setSection:Header({ Text = "About" })
 
-    setSection:Label({ Text = "Universal Hub " .. Config.Version })
+    setSection:Label({ Text = Config.Title .. " " .. Config.Version })
     setSection:SubLabel({ Text = "Powered by MacLib UI" })
 
     tabs.Bypass:Select()
 
-    -- ============================================================
-    -- CORE LOOPS
-    -- ============================================================
+    --// CORE LOOPS
     RunService.RenderStepped:Connect(function()
         local char = LocalPlayer.Character
         if not char then return end
@@ -956,7 +735,7 @@ local function buildMainUI()
         end
     end)
 
-    -- Fly
+    --// Fly
     local flyConn, flyCleanup
     local function startFly()
         local char = LocalPlayer.Character
@@ -1041,9 +820,7 @@ local function buildMainUI()
         if State.BypassEnabled then pcall(bypassAllGates); pcall(bypassAllPrompts) end
     end)
 
-    -- ============================================================
-    -- COORDINATE HUD
-    -- ============================================================
+    --// COORDINATE HUD
     local CoordGui = Instance.new("ScreenGui")
     CoordGui.Name = "UniversalHubHUD"
     CoordGui.ResetOnSpawn = false
@@ -1061,14 +838,14 @@ local function buildMainUI()
     CoordHUD.Draggable = true
     CoordHUD.Parent = CoordGui
     local CHC = Instance.new("UICorner") CHC.CornerRadius = UDim.new(0, 8) CHC.Parent = CoordHUD
-    local CHS = Instance.new("UIStroke") CHS.Color = Color3.fromRGB(255, 35, 45) CHS.Thickness = 1 CHS.Transparency = 0.5 CHS.Parent = CoordHUD
+    local CHS = Instance.new("UIStroke") CHS.Color = Color3.fromRGB(88, 132, 255) CHS.Thickness = 1 CHS.Transparency = 0.5 CHS.Parent = CoordHUD
 
     local CoordTitle = Instance.new("TextLabel")
     CoordTitle.Size = UDim2.new(1, -12, 0, 14)
     CoordTitle.Position = UDim2.new(0, 6, 0, 4)
     CoordTitle.BackgroundTransparency = 1
     CoordTitle.Text = "POSITION"
-    CoordTitle.TextColor3 = Color3.fromRGB(255, 35, 45)
+    CoordTitle.TextColor3 = Color3.fromRGB(88, 132, 255)
     CoordTitle.TextSize = 9
     CoordTitle.Font = Enum.Font.GothamBold
     CoordTitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -1124,58 +901,10 @@ local function buildMainUI()
         end)
     end)
 
-    -- ============================================================
-    -- FLOATING TOGGLE BUTTON (ปุ่มย่อ)
-    -- ============================================================
-    local ToggleGui = Instance.new("ScreenGui")
-    ToggleGui.Name = "UniversalHubToggle"
-    ToggleGui.ResetOnSpawn = false
-    ToggleGui.IgnoreGuiInset = true
-    ToggleGui.DisplayOrder = 999
-    pcall(function() ToggleGui.Parent = CoreGui end)
-    if not ToggleGui.Parent then ToggleGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-
-    local ToggleBtn = Instance.new("TextButton")
-    ToggleBtn.Name = "ToggleBtn"
-    ToggleBtn.Size = UDim2.fromOffset(50, 50)
-    ToggleBtn.Position = UDim2.new(0, 20, 0.5, -25)
-    ToggleBtn.BackgroundColor3 = Color3.fromRGB(255, 35, 45)
-    ToggleBtn.Text = "≡"
-    ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    ToggleBtn.TextSize = 22
-    ToggleBtn.Font = Enum.Font.GothamBold
-    ToggleBtn.BorderSizePixel = 0
-    ToggleBtn.AutoButtonColor = false
-    ToggleBtn.Active = true
-    ToggleBtn.Draggable = true
-    ToggleBtn.Parent = ToggleGui
-
-    local ToggleCorner = Instance.new("UICorner")
-    ToggleCorner.CornerRadius = UDim.new(1, 0)
-    ToggleCorner.Parent = ToggleBtn
-
-    local ToggleStroke = Instance.new("UIStroke")
-    ToggleStroke.Color = Color3.fromRGB(255, 255, 255)
-    ToggleStroke.Thickness = 1.5
-    ToggleStroke.Transparency = 0.5
-    ToggleStroke.Parent = ToggleBtn
-
-    ToggleBtn.MouseEnter:Connect(function()
-        TweenService:Create(ToggleBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(255, 60, 70) }):Play()
-    end)
-    ToggleBtn.MouseLeave:Connect(function()
-        TweenService:Create(ToggleBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(255, 35, 45) }):Play()
-    end)
-
-    ToggleBtn.MouseButton1Click:Connect(function()
-        local newState = not Window:GetState()
-        Window:SetState(newState)
-        ToggleBtn.Text = newState and "≡" or "▶"
-    end)
-
+    --// Notification
     Window:Notify({
         Title = Config.Title,
-        Description = "Loaded! Press " .. tostring(Window.Settings.Keybind.Name) .. " or click the button to toggle.",
+        Description = "Loaded! Press Right Ctrl to toggle the menu.",
         Lifetime = 6
     })
 
@@ -1183,13 +912,11 @@ local function buildMainUI()
     print("[" .. Config.Title .. "] Right Ctrl = toggle UI")
 end
 
--- ============================================================
--- ENTRY POINT
--- ============================================================
+--// Entry Point
 local function tryStoredKey()
     if not (readfile and isfile) then return nil end
     local ok, content = pcall(function()
-        return readfile(STORAGE_KEY .. ".txt")
+        return readfile(Config.StorageKey .. ".txt")
     end)
     if ok and content and #content > 8 then
         return content
@@ -1197,9 +924,11 @@ local function tryStoredKey()
     return nil
 end
 
-local function startVerifyFlow()
-    local stored = tryStoredKey()
+local function startFlow()
+    showLoadingScreen()
 
+    -- 1) ลองคีย์ที่บันทึกไว้ก่อน
+    local stored = tryStoredKey()
     if stored then
         local valid = verifyKey(stored)
         if valid then
@@ -1208,9 +937,13 @@ local function startVerifyFlow()
         end
     end
 
-    buildVerifyScreen(function()
+    -- 2) เปิดหน้า Getkey UI
+    local GetkeyUI = loadstring(game:HttpGet(Config.GetkeyUiUrl))()
+
+    GetkeyUI.Show(function()
+        -- onSuccess: เปิด Hub
         buildMainUI()
     end)
 end
 
-startVerifyFlow()
+startFlow()
