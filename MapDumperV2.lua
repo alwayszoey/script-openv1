@@ -1,8 +1,9 @@
 -- ============================================================
 --  MapDumperV2.lua  |  Delta Executor
---  dump: Workspace / ReplicatedStorage  (จำกัดความลึก)
---  NEW: ปุ่ม 🎯 เลือกจุด — คลิกวัตถุในแมพเพื่อ dump เฉพาะจุดนั้น
---  รูปแบบ: JSON / TXT  |  ตั้งชื่อไฟล์ได้ (ว่าง = อัตโนมัติ)
+--  dump: Workspace / ReplicatedStorage / Players
+--  🎯 เลือกจุด — คลิกวัตถุในแมพ
+--  🏁 Race Scene — dump Workspace.World.RaceShow ทั้งก้อน
+--  รูปแบบ: JSON / TXT  |  ตั้งชื่อไฟล์ได้
 -- ============================================================
 
 warn("[MapDumperV2] script started")
@@ -20,7 +21,7 @@ local CONFIG = {
     DefaultFormat          = "json",
     DumpWorkspace          = true,
     DumpReplicatedStorage  = true,
-    DumpPlayers            = false,
+    DumpPlayers            = true,   -- ← เปิดเพื่อจับ PlayerGui (race UI)
     MaxDepth               = 8,
     MaxNodes               = 200000,
     IncludeScripts         = false,
@@ -422,15 +423,16 @@ local function buildTxtOutput(output)
 end
 
 -- ────────────────── MAIN DUMP ──────────────────
--- mode: "all"  -> dumps Workspace + ReplicatedStorage
---       "point"-> dumps a single target instance
+-- mode: "all"   -> Workspace + ReplicatedStorage (+Players ถ้าเปิด)
+--       "point" -> target instance เท่านั้น
+--       "race"  -> Workspace.World.RaceShow เท่านั้น
 local function runDump(onProgress, format, userFileName, mode, targetInstance, targetPos, targetNormal)
     local startTime = tick()
     nodeCount = 0
 
     local ext = (format == "txt") and ".txt" or ".json"
 
-    -- decide filename
+    -- filename
     local baseName
     if mode == "point" and targetInstance then
         baseName = sanitizeFileName(userFileName)
@@ -438,6 +440,8 @@ local function runDump(onProgress, format, userFileName, mode, targetInstance, t
             baseName = sanitizeFileName(targetInstance.Name) or "Point"
             baseName = baseName .. "_" .. tostring(os.time())
         end
+    elseif mode == "race" then
+        baseName = sanitizeFileName(userFileName) or "RaceShow"
     else
         baseName = sanitizeFileName(userFileName)
         if not baseName then
@@ -454,7 +458,9 @@ local function runDump(onProgress, format, userFileName, mode, targetInstance, t
             version = tostring(game.PlaceVersion),
             dumped  = os.time(),
             executor = "Delta",
-            mode    = (mode == "point") and "PointCapture" or "DeepDump",
+            mode    = (mode == "point" and "PointCapture")
+                   or (mode == "race" and "RaceScene")
+                   or "DeepDump",
             format  = format,
             fileName = fileName,
             includes = {
@@ -484,6 +490,33 @@ local function runDump(onProgress, format, userFileName, mode, targetInstance, t
         task.wait()
         local ok, node = pcall(dumpInstance, targetInstance, 0)
         if ok and node then table.insert(output.roots, node) end
+
+    elseif mode == "race" then
+        -- locate Workspace.World.RaceShow
+        local world = workspace:FindFirstChild("World")
+        local raceShow = world and world:FindFirstChild("RaceShow")
+
+        if not raceShow then
+            -- fallback: search recursively
+            for _, d in ipairs(workspace:GetDescendants()) do
+                if d.Name == "RaceShow" then
+                    raceShow = d
+                    break
+                end
+            end
+        end
+
+        if not raceShow then
+            error("ไม่พบ RaceShow ใน Workspace")
+        end
+
+        output.meta.targetPath = raceShow:GetFullName()
+
+        onProgress("กำลัง dump " .. raceShow:GetFullName() .. "…", 0.5)
+        task.wait()
+        local ok, node = pcall(dumpInstance, raceShow, 0)
+        if ok and node then table.insert(output.roots, node) end
+
     else
         local targets = {}
         if CONFIG.DumpWorkspace         then table.insert(targets, workspace) end
@@ -532,7 +565,6 @@ local function runDump(onProgress, format, userFileName, mode, targetInstance, t
             end
 
             for _, root in ipairs(safeOutput.roots or {}) do stripDeep(root) end
-            safeOutput.meta.mode = (mode == "point") and "PointCapture-Fallback" or "DeepDump-Fallback"
 
             local okFallback, fallbackJson = pcall(function()
                 return HttpService:JSONEncode(safeOutput)
@@ -556,7 +588,7 @@ local function runDump(onProgress, format, userFileName, mode, targetInstance, t
     return elapsed, #finalStr, fileName
 end
 
--- ────────────────── POINT PICKER (raycast + hover highlight) ──────────────────
+-- ────────────────── POINT PICKER ──────────────────
 local function createPicker(onPick, onCancel)
     local Camera = workspace.CurrentCamera
     if not Camera then
@@ -567,7 +599,6 @@ local function createPicker(onPick, onCancel)
     local active = true
     local connections = {}
 
-    -- Hover highlight (selection box) ──
     local hoverBox = Instance.new("SelectionBox")
     hoverBox.Name          = "MapDumperV2_Hover"
     hoverBox.LineThickness = 0.12
@@ -576,7 +607,6 @@ local function createPicker(onPick, onCancel)
     hoverBox.Visible       = false
     hoverBox.Parent        = game.CoreGui
 
-    -- Also a small marker at the exact hit point
     local hoverDot = Instance.new("Part")
     hoverDot.Name         = "MapDumperV2_HoverDot"
     hoverDot.Shape        = Enum.PartType.Ball
@@ -590,7 +620,6 @@ local function createPicker(onPick, onCancel)
     hoverDot.Transparency = 0.2
     hoverDot.Parent       = workspace
 
-    -- point at the center of screen? No — we need the mouse. Use Mouse for hover.
     local player = Players.LocalPlayer
     local mouse  = player and player:GetMouse()
 
@@ -614,10 +643,8 @@ local function createPicker(onPick, onCancel)
         if hoverDot then hoverDot:Destroy() end
     end
 
-    -- Hover update via RenderStepped + mouse position
     table.insert(connections, RunService.RenderStepped:Connect(function()
         if not active then return end
-        local mp = mouse and mouse.Hit
         local pos = UserInputService:GetMouseLocation()
         local hit = getTargetFromPosition(pos)
 
@@ -632,7 +659,6 @@ local function createPicker(onPick, onCancel)
         end
     end))
 
-    -- Click to pick
     table.insert(connections, UserInputService.InputBegan:Connect(function(input, processed)
         if not active then return end
         if processed then return end
@@ -649,7 +675,6 @@ local function createPicker(onPick, onCancel)
         end
     end))
 
-    -- Right-click / Esc cancels
     table.insert(connections, UserInputService.InputBegan:Connect(function(input, processed)
         if not active then return end
         if input.UserInputType == Enum.UserInputType.MouseButton2 then
@@ -692,7 +717,7 @@ local function makeGui()
     sg.Parent         = parentGui
 
     -- ── panel ──
-    local W, H = 340, 400
+    local W, H = 340, 452
     local panel = Instance.new("Frame")
     panel.Size             = UDim2.new(0, W, 0, H)
     panel.Position         = UDim2.new(0.5, -W/2, 0.5, -H/2)
@@ -744,7 +769,7 @@ local function makeGui()
     statusLbl.TextSize               = 12
     statusLbl.TextXAlignment         = Enum.TextXAlignment.Center
     statusLbl.TextWrapped            = true
-    statusLbl.Text                   = "ตั้งค่าแล้วกด Dump"
+    statusLbl.Text                   = "ตั้งค่าแล้วกดปุ่ม"
     statusLbl.Parent                 = panel
 
     -- ── filename label ──
@@ -756,7 +781,7 @@ local function makeGui()
     nameLabel.Font                   = Enum.Font.GothamMedium
     nameLabel.TextSize               = 12
     nameLabel.TextXAlignment         = Enum.TextXAlignment.Left
-    nameLabel.Text                   = "ชื่อไฟล์ (เว้นว่าง = ใช้ชื่อ map / ชื่อวัตถุ)"
+    nameLabel.Text                   = "ชื่อไฟล์ (เว้นว่าง = อัตโนมัติ)"
     nameLabel.Parent                 = panel
 
     -- ── filename box ──
@@ -911,10 +936,41 @@ local function makeGui()
         end
     end)
 
+    -- ── race scene button ──
+    local raceBtn = Instance.new("TextButton")
+    raceBtn.Size             = UDim2.new(1, -30, 0, 38)
+    raceBtn.Position         = UDim2.new(0, 15, 0, 278)
+    raceBtn.BackgroundColor3 = Color3.fromRGB(120, 70, 40)
+    raceBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+    raceBtn.Font             = Enum.Font.GothamBold
+    raceBtn.TextSize         = 14
+    raceBtn.Text             = "🏁  Dump Race Scene (RaceShow)"
+    raceBtn.AutoButtonColor  = false
+    raceBtn.Parent           = panel
+
+    local raceCorner = Instance.new("UICorner")
+    raceCorner.CornerRadius = UDim.new(0, 10)
+    raceCorner.Parent = raceBtn
+
+    raceBtn.MouseEnter:Connect(function()
+        if raceBtn.Active then
+            TweenService:Create(raceBtn, TweenInfo.new(0.15), {
+                BackgroundColor3 = Color3.fromRGB(160, 95, 55)
+            }):Play()
+        end
+    end)
+    raceBtn.MouseLeave:Connect(function()
+        if raceBtn.Active then
+            TweenService:Create(raceBtn, TweenInfo.new(0.15), {
+                BackgroundColor3 = Color3.fromRGB(120, 70, 40)
+            }):Play()
+        end
+    end)
+
     -- ── dump all button ──
     local btn = Instance.new("TextButton")
     btn.Size             = UDim2.new(1, -30, 0, 44)
-    btn.Position         = UDim2.new(0, 15, 0, 278)
+    btn.Position         = UDim2.new(0, 15, 0, 322)
     btn.BackgroundColor3 = Color3.fromRGB(40, 110, 255)
     btn.TextColor3       = Color3.fromRGB(255, 255, 255)
     btn.Font             = Enum.Font.GothamBold
@@ -944,8 +1000,8 @@ local function makeGui()
 
     -- ── info ──
     local infoLbl = Instance.new("TextLabel")
-    infoLbl.Size                   = UDim2.new(1, -20, 0, 34)
-    infoLbl.Position               = UDim2.new(0, 10, 0, 330)
+    infoLbl.Size                   = UDim2.new(1, -20, 0, 36)
+    infoLbl.Position               = UDim2.new(0, 10, 0, 374)
     infoLbl.BackgroundTransparency = 1
     infoLbl.TextColor3             = Color3.fromRGB(90, 100, 130)
     infoLbl.Font                   = Enum.Font.Gotham
@@ -1033,11 +1089,8 @@ local function makeGui()
                     or string.format("%.1f KB", b/1024)),
                 tostring(fname))
 
-            warn(string.format("[MapDumperV2] ✅ บันทึกสำเร็จ → %s (%.2f วินาที, %.1f KB)",
+            warn(string.format("[MapDumperV2] ✅ %s (%.2f วินาที, %.1f KB)",
                 tostring(fname), a, b/1024))
-
-            task.wait(2)
-            closePanel()
         else
             barFill.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
             statusLbl.Text       = "❌  " .. tostring(a):sub(1, 70)
@@ -1050,8 +1103,7 @@ local function makeGui()
     btn.MouseButton1Click:Connect(function()
         if busy then return end
         busy = true
-        btn.Active = false
-        pickBtn.Active = false
+        btn.Active, pickBtn.Active, raceBtn.Active = false, false, false
 
         local chosenFormat = currentFormat
         local typedName    = nameBox.Text
@@ -1062,6 +1114,32 @@ local function makeGui()
         task.spawn(function()
             local ok, a, b, fname = pcall(runDump, onProgress, chosenFormat, typedName, "all", nil, nil, nil)
             handleResult(ok, a, b, fname)
+            busy = false
+            btn.Active, pickBtn.Active, raceBtn.Active = true, true, true
+            btn.Text = "🚀  Dump ทั้งหมด"
+            btn.BackgroundColor3 = Color3.fromRGB(40, 110, 255)
+        end)
+    end)
+
+    -- ── Race Scene ──
+    raceBtn.MouseButton1Click:Connect(function()
+        if busy then return end
+        busy = true
+        btn.Active, pickBtn.Active, raceBtn.Active = false, false, false
+
+        local chosenFormat = currentFormat
+        local typedName    = nameBox.Text
+
+        raceBtn.Text             = "⏳  กำลัง dump Race…"
+        raceBtn.BackgroundColor3 = Color3.fromRGB(80, 50, 30)
+
+        task.spawn(function()
+            local ok, a, b, fname = pcall(runDump, onProgress, chosenFormat, typedName, "race", nil, nil, nil)
+            handleResult(ok, a, b, fname)
+            busy = false
+            btn.Active, pickBtn.Active, raceBtn.Active = true, true, true
+            raceBtn.Text = "🏁  Dump Race Scene (RaceShow)"
+            raceBtn.BackgroundColor3 = Color3.fromRGB(120, 70, 40)
         end)
     end)
 
@@ -1069,8 +1147,7 @@ local function makeGui()
     pickBtn.MouseButton1Click:Connect(function()
         if busy then return end
         busy = true
-        pickBtn.Active = false
-        btn.Active = false
+        pickBtn.Active, btn.Active, raceBtn.Active = false, false, false
 
         pickBtn.Text = "🎯  กำลังเลือก… (คลิก / คลิกขวายกเลิก)"
         statusLbl.Text = "คลิกที่วัตถุในแมพที่ต้องการ dump"
@@ -1081,12 +1158,10 @@ local function makeGui()
 
             local function finish()
                 busy = false
-                pickBtn.Active = true
-                btn.Active = true
+                pickBtn.Active, btn.Active, raceBtn.Active = true, true, true
                 pickBtn.Text = "🎯  เลือกจุด (คลิกในแมพ)"
             end
 
-            -- run picker on main thread-ish via wait
             local pickedInst, pickedPos, pickedNorm
             local cancelled = false
 
@@ -1101,7 +1176,6 @@ local function makeGui()
                 end
             )
 
-            -- wait for pick or cancel
             local startWait = tick()
             while not pickedInst and not cancelled and (tick() - startWait) < 120 do
                 task.wait(0.05)
@@ -1115,7 +1189,6 @@ local function makeGui()
             statusLbl.Text = "เลือกแล้ว: " .. pickedInst:GetFullName()
             statusLbl.TextColor3 = Color3.fromRGB(160, 170, 200)
 
-            -- auto-fill filename if empty
             local typedName = nameBox.Text
             if typedName == nil or typedName:gsub("%s", "") == "" then
                 nameBox.Text = pickedInst.Name
