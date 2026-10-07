@@ -1,7 +1,7 @@
 -- ============================================================
---  MapDumper.lua  |  Delta Executor  |  กดปุ่มเดียว → JSON
+--  MapDumper.lua  |  Delta Executor
 --  dump: workspace + ReplicatedStorage (จำกัดความลึก)
---  GUI: กล่องกลางจอ ลากได้ | dump เสร็จ → ปิดอัตโนมัติ
+--  รูปแบบ: JSON / TXT  |  ตั้งชื่อไฟล์ได้ (ว่าง = ใช้ชื่อ map อัตโนมัติ)
 -- ============================================================
 
 warn("[MapDumper] script started")
@@ -14,7 +14,8 @@ local Players           = game:GetService("Players")
 
 -- ────────────────── CONFIG ──────────────────
 local CONFIG = {
-    OutputFile             = "MapDump.json",
+    DefaultFileName        = "",        -- ว่าง = ใช้ชื่อ map อัตโนมัติ
+    DefaultFormat          = "json",    -- "json" หรือ "txt"
     DumpWorkspace          = true,
     DumpReplicatedStorage  = true,
     DumpPlayers            = false,
@@ -38,6 +39,40 @@ end
 local function round3(n)
     if not isFiniteNumber(n) then return 0 end
     return math.floor(n * 1000 + 0.5) / 1000
+end
+
+-- sanitize ชื่อไฟล์: ตัดอักขระต้องห้ามของ filesystem
+local function sanitizeFileName(name)
+    if type(name) ~= "string" then return nil end
+    name = name:gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then return nil end
+    -- ตัดอักขระต้องห้าม: \ / : * ? " < > | และควบคุม
+    name = name:gsub('[\\/:*?"<>|]', "_")
+    name = name:gsub("%c", "")
+    name = name:gsub("%.%.", "_")        -- กัน path traversal
+    if #name > 100 then name = name:sub(1, 100) end
+    if name == "" then return nil end
+    return name
+end
+
+-- ดึงชื่อ map จาก DataModel แล้ว sanitize
+local function getMapName()
+    local raw = game:GetService("MarketplaceService")
+    -- พยายามดึงชื่อเกมจริงก่อน
+    local okName, info = pcall(function()
+        return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+    end)
+    if okName and info and info.Name and info.Name ~= "" then
+        return sanitizeFileName(info.Name) or ("Map_" .. tostring(game.PlaceId))
+    end
+    -- fallback: ใช้ชื่อ place file ปัจจุบัน
+    local okFile, fileName = pcall(function()
+        return game:GetService("Players").LocalPlayer and game.PlaceId
+    end)
+    if okFile and fileName then
+        return "Map_" .. tostring(fileName)
+    end
+    return "MapDump"
 end
 
 local function safeGet(inst, prop)
@@ -303,10 +338,115 @@ local function jsonSafe(value, seen)
     return ok and str or "<unsupported>"
 end
 
+-- ────────────────── TXT ENCODER ──────────────────
+-- แปลง node tree เป็น text แบบ indent อ่านง่าย
+local function encodeTxt(node, indent, out)
+    indent = indent or 0
+    out = out or {}
+
+    local pad = string.rep("  ", indent)
+    local header = pad .. "[" .. node.className .. "] " .. node.name
+    table.insert(out, header)
+
+    if node.properties and next(node.properties) then
+        -- เรียง key ให้อ่านง่าย
+        local keys = {}
+        for k, _ in pairs(node.properties) do table.insert(keys, k) end
+        table.sort(keys)
+        for _, k in ipairs(keys) do
+            local v = node.properties[k]
+            local vs
+            if type(v) == "table" then
+                local parts = {}
+                for kk, vv in pairs(v) do
+                    table.insert(parts, tostring(kk) .. "=" .. tostring(vv))
+                end
+                vs = "{" .. table.concat(parts, ", ") .. "}"
+            else
+                vs = tostring(v)
+            end
+            table.insert(out, pad .. "  ." .. k .. " = " .. vs)
+        end
+    end
+
+    if node.attributes then
+        local keys = {}
+        for k, _ in pairs(node.attributes) do table.insert(keys, k) end
+        table.sort(keys)
+        for _, k in ipairs(keys) do
+            local v = node.attributes[k]
+            local vs
+            if type(v) == "table" then
+                local parts = {}
+                for kk, vv in pairs(v) do
+                    table.insert(parts, tostring(kk) .. "=" .. tostring(vv))
+                end
+                vs = "{" .. table.concat(parts, ", ") .. "}"
+            else
+                vs = tostring(v)
+            end
+            table.insert(out, pad .. "  @" .. k .. " = " .. vs)
+        end
+    end
+
+    if node.tags then
+        table.insert(out, pad .. "  #tags = " .. table.concat(node.tags, ", "))
+    end
+
+    if node.visibility then
+        local parts = {}
+        for k, v in pairs(node.visibility) do
+            table.insert(parts, k .. "=" .. tostring(v))
+        end
+        if #parts > 0 then
+            table.insert(out, pad .. "  ~visibility: " .. table.concat(parts, ", "))
+        end
+    end
+
+    if node.children then
+        for _, child in ipairs(node.children) do
+            encodeTxt(child, indent + 1, out)
+        end
+    end
+
+    return out
+end
+
+local function buildTxtOutput(output)
+    local lines = {}
+
+    table.insert(lines, "============================================")
+    table.insert(lines, "  MAP DUMP  |  " .. tostring(output.meta.game))
+    table.insert(lines, "============================================")
+    table.insert(lines, "game:        " .. tostring(output.meta.game))
+    table.insert(lines, "place:       " .. tostring(output.meta.place))
+    table.insert(lines, "version:     " .. tostring(output.meta.version))
+    table.insert(lines, "dumped:      " .. tostring(output.meta.dumped))
+    table.insert(lines, "mode:        " .. tostring(output.meta.mode))
+    table.insert(lines, "totalNodes:  " .. tostring(output.meta.totalNodes or 0))
+    table.insert(lines, "")
+
+    for _, root in ipairs(output.roots or {}) do
+        table.insert(lines, "───────── ROOT: " .. root.name .. " ─────────")
+        encodeTxt(root, 0, lines)
+        table.insert(lines, "")
+    end
+
+    return table.concat(lines, "\n")
+end
+
 -- ────────────────── MAIN DUMP ──────────────────
-local function runDump(onProgress)
+local function runDump(onProgress, format, userFileName)
     local startTime = tick()
     nodeCount = 0
+
+    -- คำนวณชื่อไฟล์: ถ้าผู้ใช้ตั้งไว้ใช้ค่านั้น ไม่งั้นดึงจากชื่อ map
+    local baseName = sanitizeFileName(userFileName)
+    if not baseName then
+        baseName = getMapName()
+    end
+    local ext = (format == "txt") and ".txt" or ".json"
+    local fileName = baseName .. ext
 
     local output = {
         meta = {
@@ -316,6 +456,8 @@ local function runDump(onProgress)
             dumped  = os.time(),
             executor = "Delta",
             mode    = "DeepDump",
+            format  = format,
+            fileName = fileName,
             includes = {
                 attributes = CONFIG.IncludeAttributes,
                 tags = CONFIG.IncludeTags,
@@ -338,57 +480,68 @@ local function runDump(onProgress)
         if ok and node then table.insert(output.roots, node) end
     end
 
-    onProgress("กำลังเข้ารหัส JSON…", 0.93)
+    onProgress("กำลังเข้ารหัส…", 0.93)
     task.wait()
 
     local elapsed = math.floor((tick() - startTime) * 100 + 0.5) / 100
     output.meta.dumpTimeSeconds = elapsed
     output.meta.totalNodes = nodeCount
 
-    local safeOutput = jsonSafe(output)
+    local finalStr
 
-    local ok2, jsonStr = pcall(function()
-        return HttpService:JSONEncode(safeOutput)
-    end)
+    if format == "txt" then
+        -- ── TXT ──
+        local okTxt, txt = pcall(buildTxtOutput, output)
+        if not okTxt then error("สร้าง TXT ล้มเหลว: " .. tostring(txt)) end
+        finalStr = txt
+    else
+        -- ── JSON ──
+        local safeOutput = jsonSafe(output)
 
-    if not ok2 then
-        local function stripDeep(node)
-            if type(node) ~= "table" then return node end
-            node.attributes = nil
-            node.tags = nil
-            node.descendantCount = nil
-            node.visibility = nil
-            if type(node.children) == "table" then
-                for _, c in ipairs(node.children) do stripDeep(c) end
-            end
-            return node
-        end
-
-        for _, root in ipairs(safeOutput.roots or {}) do stripDeep(root) end
-        safeOutput.meta.mode = "DeepDump-Fallback"
-
-        local okFallback, fallbackJson = pcall(function()
+        local ok2, jsonStr = pcall(function()
             return HttpService:JSONEncode(safeOutput)
         end)
 
-        if not okFallback then
-            error("ไม่สามารถสร้าง JSON ได้: " .. tostring(fallbackJson))
+        if not ok2 then
+            local function stripDeep(node)
+                if type(node) ~= "table" then return node end
+                node.attributes = nil
+                node.tags = nil
+                node.descendantCount = nil
+                node.visibility = nil
+                if type(node.children) == "table" then
+                    for _, c in ipairs(node.children) do stripDeep(c) end
+                end
+                return node
+            end
+
+            for _, root in ipairs(safeOutput.roots or {}) do stripDeep(root) end
+            safeOutput.meta.mode = "DeepDump-Fallback"
+
+            local okFallback, fallbackJson = pcall(function()
+                return HttpService:JSONEncode(safeOutput)
+            end)
+
+            if not okFallback then
+                error("ไม่สามารถสร้าง JSON ได้: " .. tostring(fallbackJson))
+            end
+            jsonStr = fallbackJson
         end
-        jsonStr = fallbackJson
+
+        finalStr = jsonStr
     end
 
     onProgress("กำลังบันทึกไฟล์…", 0.97)
     task.wait()
 
-    local ok3, err = pcall(function() writefile(CONFIG.OutputFile, jsonStr) end)
+    local ok3, err = pcall(function() writefile(fileName, finalStr) end)
     if not ok3 then error("writefile ล้มเหลว: " .. tostring(err)) end
 
-    return elapsed, #jsonStr
+    return elapsed, #finalStr, fileName
 end
 
 -- ────────────────── GUI ──────────────────
 local function makeGui()
-    -- หา parent ที่ปลอดภัย (PlayerGui ก่อน CoreGui)
     local parentGui
     local okPG, pg = pcall(function()
         return Players.LocalPlayer:WaitForChild("PlayerGui", 5)
@@ -416,7 +569,8 @@ local function makeGui()
     sg.DisplayOrder   = 999
     sg.Parent         = parentGui
 
-    local W, H = 300, 190
+    -- ── panel (สูงขึ้นเพื่อใส่ช่องชื่อไฟล์ + toggle) ──
+    local W, H = 320, 330
     local panel = Instance.new("Frame")
     panel.Size             = UDim2.new(0, W, 0, H)
     panel.Position         = UDim2.new(0.5, -W/2, 0.5, -H/2)
@@ -433,6 +587,7 @@ local function makeGui()
     stroke.Thickness = 1.5
     stroke.Parent    = panel
 
+    -- ── Title bar ──
     local titleBar = Instance.new("TextLabel")
     titleBar.Size             = UDim2.new(1, 0, 0, 40)
     titleBar.Position         = UDim2.new(0, 0, 0, 0)
@@ -457,21 +612,134 @@ local function makeGui()
     titleFix.ZIndex           = 1
     titleFix.Parent           = titleBar
 
+    -- ── status ──
     local statusLbl = Instance.new("TextLabel")
-    statusLbl.Size                   = UDim2.new(1, -20, 0, 30)
-    statusLbl.Position               = UDim2.new(0, 10, 0, 50)
+    statusLbl.Size                   = UDim2.new(1, -20, 0, 26)
+    statusLbl.Position               = UDim2.new(0, 10, 0, 46)
     statusLbl.BackgroundTransparency = 1
     statusLbl.TextColor3             = Color3.fromRGB(160, 170, 200)
     statusLbl.Font                   = Enum.Font.Gotham
     statusLbl.TextSize               = 13
     statusLbl.TextXAlignment         = Enum.TextXAlignment.Center
     statusLbl.TextWrapped            = true
-    statusLbl.Text                   = "กดปุ่มด้านล่างเพื่อเริ่ม dump"
+    statusLbl.Text                   = "ตั้งค่าแล้วกด Dump"
     statusLbl.Parent                 = panel
 
+    -- ── ป้ายกำกับ: ชื่อไฟล์ ──
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size                   = UDim2.new(1, -30, 0, 18)
+    nameLabel.Position               = UDim2.new(0, 15, 0, 78)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.TextColor3             = Color3.fromRGB(140, 150, 180)
+    nameLabel.Font                   = Enum.Font.GothamMedium
+    nameLabel.TextSize               = 12
+    nameLabel.TextXAlignment         = Enum.TextXAlignment.Left
+    nameLabel.Text                   = "ชื่อไฟล์ (เว้นว่าง = ใช้ชื่อ map)"
+    nameLabel.Parent                 = panel
+
+    -- ── TextBox ชื่อไฟล์ ──
+    local nameBox = Instance.new("TextBox")
+    nameBox.Size             = UDim2.new(1, -30, 0, 34)
+    nameBox.Position         = UDim2.new(0, 15, 0, 98)
+    nameBox.BackgroundColor3 = Color3.fromRGB(30, 30, 44)
+    nameBox.BorderSizePixel  = 0
+    nameBox.TextColor3       = Color3.fromRGB(230, 235, 255)
+    nameBox.PlaceholderText  = "(อัตโนมัติจากชื่อ map)"
+    nameBox.PlaceholderColor3 = Color3.fromRGB(90, 100, 130)
+    nameBox.Font             = Enum.Font.Gotham
+    nameBox.TextSize         = 13
+    nameBox.Text             = CONFIG.DefaultFileName
+    nameBox.ClearTextOnFocus = false
+    nameBox.TextXAlignment   = Enum.TextXAlignment.Left
+    nameBox.Parent           = panel
+
+    local nameBoxCorner = Instance.new("UICorner")
+    nameBoxCorner.CornerRadius = UDim.new(0, 8)
+    nameBoxCorner.Parent = nameBox
+
+    local nameBoxPad = Instance.new("UIPadding")
+    nameBoxPad.PaddingLeft   = UDim.new(0, 8)
+    nameBoxPad.PaddingRight  = UDim.new(0, 8)
+    nameBoxPad.Parent = nameBox
+
+    -- ── ป้ายกำกับ: รูปแบบ ──
+    local fmtLabel = Instance.new("TextLabel")
+    fmtLabel.Size                   = UDim2.new(1, -30, 0, 18)
+    fmtLabel.Position               = UDim2.new(0, 15, 0, 142)
+    fmtLabel.BackgroundTransparency = 1
+    fmtLabel.TextColor3             = Color3.fromRGB(140, 150, 180)
+    fmtLabel.Font                   = Enum.Font.GothamMedium
+    fmtLabel.TextSize               = 12
+    fmtLabel.TextXAlignment         = Enum.TextXAlignment.Left
+    fmtLabel.Text                   = "รูปแบบไฟล์"
+    fmtLabel.Parent                 = panel
+
+    -- ── format selector (JSON / TXT) ──
+    local fmtHolder = Instance.new("Frame")
+    fmtHolder.Size             = UDim2.new(1, -30, 0, 38)
+    fmtHolder.Position         = UDim2.new(0, 15, 0, 162)
+    fmtHolder.BackgroundColor3 = Color3.fromRGB(30, 30, 44)
+    fmtHolder.BorderSizePixel  = 0
+    fmtHolder.Parent           = panel
+
+    local fmtHolderCorner = Instance.new("UICorner")
+    fmtHolderCorner.CornerRadius = UDim.new(0, 8)
+    fmtHolderCorner.Parent = fmtHolder
+
+    local fmtPadding = Instance.new("UIPadding")
+    fmtPadding.PaddingTop    = UDim.new(0, 4)
+    fmtPadding.PaddingBottom = UDim.new(0, 4)
+    fmtPadding.PaddingLeft   = UDim.new(0, 4)
+    fmtPadding.PaddingRight  = UDim.new(0, 4)
+    fmtPadding.Parent = fmtHolder
+
+    local fmtLayout = Instance.new("UIListLayout")
+    fmtLayout.FillDirection     = Enum.FillDirection.Horizontal
+    fmtLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    fmtLayout.VerticalAlignment   = Enum.VerticalAlignment.Center
+    fmtLayout.Padding           = UDim.new(0, 4)
+    fmtLayout.Parent = fmtHolder
+
+    local currentFormat = CONFIG.DefaultFormat
+
+    local function makeFormatButton(text, value)
+        local b = Instance.new("TextButton")
+        b.Size             = UDim2.new(0, 140, 1, 0)
+        b.BackgroundColor3 = (value == currentFormat)
+            and Color3.fromRGB(40, 110, 255)
+            or Color3.fromRGB(45, 45, 60)
+        b.TextColor3       = Color3.fromRGB(255, 255, 255)
+        b.Font             = Enum.Font.GothamBold
+        b.TextSize         = 13
+        b.Text             = text
+        b.AutoButtonColor  = false
+        b.Parent           = fmtHolder
+
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 6)
+        c.Parent = b
+
+        b.MouseButton1Click:Connect(function()
+            currentFormat = value
+            for _, sib in ipairs(fmtHolder:GetChildren()) do
+                if sib:IsA("TextButton") then
+                    sib.BackgroundColor3 = (sib == b)
+                        and Color3.fromRGB(40, 110, 255)
+                        or Color3.fromRGB(45, 45, 60)
+                end
+            end
+        end)
+
+        return b
+    end
+
+    makeFormatButton("JSON", "json")
+    makeFormatButton("TXT",  "txt")
+
+    -- ── progress bar ──
     local barBg = Instance.new("Frame")
     barBg.Size             = UDim2.new(1, -30, 0, 10)
-    barBg.Position         = UDim2.new(0, 15, 0, 90)
+    barBg.Position         = UDim2.new(0, 15, 0, 212)
     barBg.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
     barBg.BorderSizePixel  = 0
     barBg.Parent           = panel
@@ -490,9 +758,10 @@ local function makeGui()
     barFillCorner.CornerRadius = UDim.new(0, 5)
     barFillCorner.Parent = barFill
 
+    -- ── ปุ่ม Dump ──
     local btn = Instance.new("TextButton")
     btn.Size             = UDim2.new(1, -30, 0, 44)
-    btn.Position         = UDim2.new(0, 15, 0, 115)
+    btn.Position         = UDim2.new(0, 15, 0, 234)
     btn.BackgroundColor3 = Color3.fromRGB(40, 110, 255)
     btn.TextColor3       = Color3.fromRGB(255, 255, 255)
     btn.Font             = Enum.Font.GothamBold
@@ -506,24 +775,30 @@ local function makeGui()
     btnCorner.Parent = btn
 
     btn.MouseEnter:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.15), {
-            BackgroundColor3 = Color3.fromRGB(60, 140, 255)
-        }):Play()
+        if btn.Active then
+            TweenService:Create(btn, TweenInfo.new(0.15), {
+                BackgroundColor3 = Color3.fromRGB(60, 140, 255)
+            }):Play()
+        end
     end)
     btn.MouseLeave:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.15), {
-            BackgroundColor3 = Color3.fromRGB(40, 110, 255)
-        }):Play()
+        if btn.Active then
+            TweenService:Create(btn, TweenInfo.new(0.15), {
+                BackgroundColor3 = Color3.fromRGB(40, 110, 255)
+            }):Play()
+        end
     end)
 
+    -- ── info ──
     local infoLbl = Instance.new("TextLabel")
     infoLbl.Size                   = UDim2.new(1, -20, 0, 22)
-    infoLbl.Position               = UDim2.new(0, 10, 0, 162)
+    infoLbl.Position               = UDim2.new(0, 10, 0, 284)
     infoLbl.BackgroundTransparency = 1
     infoLbl.TextColor3             = Color3.fromRGB(90, 100, 130)
     infoLbl.Font                   = Enum.Font.Gotham
     infoLbl.TextSize               = 12
     infoLbl.TextXAlignment         = Enum.TextXAlignment.Center
+    infoLbl.TextWrapped            = true
     infoLbl.Text                   = ""
     infoLbl.Parent                 = panel
 
@@ -560,7 +835,7 @@ local function makeGui()
         end
     end)
 
-    -- ── Close (fade) ──
+    -- ── close ──
     local function closePanel()
         TweenService:Create(panel, TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
             Position = UDim2.new(panel.Position.X.Scale, panel.Position.X.Offset,
@@ -572,7 +847,7 @@ local function makeGui()
             if child:IsA("GuiObject") then
                 TweenService:Create(child, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
             end
-            if child:IsA("TextLabel") or child:IsA("TextButton") then
+            if child:IsA("TextLabel") or child:IsA("TextButton") or child:IsA("TextBox") then
                 TweenService:Create(child, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
             end
         end
@@ -580,12 +855,15 @@ local function makeGui()
         task.delay(0.6, function() sg:Destroy() end)
     end
 
-    -- ── Dump button ──
+    -- ── Dump ──
     local busy = false
     btn.MouseButton1Click:Connect(function()
         if busy then return end
         busy = true
         btn.Active = false
+
+        local chosenFormat = currentFormat
+        local typedName    = nameBox.Text
 
         local function onProgress(msg, pct)
             statusLbl.Text = msg
@@ -599,7 +877,7 @@ local function makeGui()
         btn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
 
         task.spawn(function()
-            local ok, a, b = pcall(runDump, onProgress)
+            local ok, a, b, fname = pcall(runDump, onProgress, chosenFormat, typedName)
             if ok then
                 barFill.BackgroundColor3 = Color3.fromRGB(40, 200, 110)
                 TweenService:Create(barFill, TweenInfo.new(0.3), {
@@ -608,20 +886,21 @@ local function makeGui()
 
                 statusLbl.Text       = "✅  dump สำเร็จ!"
                 statusLbl.TextColor3 = Color3.fromRGB(100, 230, 150)
-                infoLbl.Text         = string.format("%.2f วินาที  •  %s",
+                infoLbl.Text         = string.format("%.2f วินาที • %s\n→ %s",
                     a, (b >= 1048576 and string.format("%.2f MB", b/1048576)
-                        or string.format("%.1f KB", b/1024)))
+                        or string.format("%.1f KB", b/1024)),
+                    tostring(fname))
                 btn.Text             = "✅  เสร็จแล้ว"
                 btn.BackgroundColor3 = Color3.fromRGB(30, 170, 80)
 
                 warn(string.format("[MapDumper] ✅ บันทึกสำเร็จ → %s (%.2f วินาที, %.1f KB)",
-                    CONFIG.OutputFile, a, b/1024))
+                    tostring(fname), a, b/1024))
 
                 task.wait(2)
                 closePanel()
             else
                 barFill.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
-                statusLbl.Text       = "❌  " .. tostring(a):sub(1, 60)
+                statusLbl.Text       = "❌  " .. tostring(a):sub(1, 70)
                 statusLbl.TextColor3 = Color3.fromRGB(255, 120, 120)
                 btn.Text             = "🔄  ลองใหม่"
                 btn.BackgroundColor3 = Color3.fromRGB(40, 110, 255)
@@ -633,7 +912,6 @@ local function makeGui()
     end)
 end
 
--- ── launch ──
 local okGui, guiErr = pcall(makeGui)
 if not okGui then
     warn("[MapDumper] makeGui error: " .. tostring(guiErr))
