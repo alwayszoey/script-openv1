@@ -2,15 +2,31 @@
 --  Spot the Fake: Anime — AutoFarm  |  Rayfield UI
 -- ══════════════════════════════════════════════════════
 
--- ── RAYFIELD LOADER ──────────────────────────────────
-local Rayfield = loadstring(game:HttpGet(
-    "https://sirius.menu/rayfield"
-))()
+warn("[SpotFake] script start")
+
+-- ── RAYFIELD LOADER (protected) ──────────────────────
+if not loadstring then
+    warn("[SpotFake] loadstring unavailable in this environment")
+    return
+end
+
+local okR, RayfieldOrErr = pcall(function()
+    return loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+end)
+if not okR then
+    warn("[SpotFake] Rayfield fetch/load failed: " .. tostring(RayfieldOrErr))
+    return
+end
+local Rayfield = RayfieldOrErr
+if typeof(Rayfield) ~= "table" then
+    warn("[SpotFake] Rayfield is not a table — URL returned bad content: " .. tostring(Rayfield))
+    return
+end
+warn("[SpotFake] Rayfield loaded OK")
 
 -- ── SERVICES ─────────────────────────────────────────
-local Players       = game:GetService("Players")
-local RunService    = game:GetService("RunService")
-local TweenService  = game:GetService("TweenService")
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local lp   = Players.LocalPlayer
@@ -18,7 +34,7 @@ local char = lp.Character or lp.CharacterAdded:Wait()
 local hrp  = char:WaitForChild("HumanoidRootPart")
 local hum  = char:WaitForChild("Humanoid")
 
--- ── CONFIG (เชื่อมกับ UI) ─────────────────────────────
+-- ── CONFIG ───────────────────────────────────────────
 local CFG = {
     ENABLED        = false,
     SPEED          = 100,
@@ -49,7 +65,7 @@ local state = {
     totalRounds   = 0,
     collectedGood = 0,
     spawnCached   = false,
-    statusLabel   = nil,   -- Rayfield label ref
+    statusLabel   = nil,
 }
 
 -- ── UTILS ────────────────────────────────────────────
@@ -57,23 +73,28 @@ local function get_spawn()
     if state.spawnCached then return CFG.SPAWN_POS end
     for _, c in ipairs(workspace:GetChildren()) do
         if c:IsA("SpawnLocation") then
-            CFG.SPAWN_POS   = c.Position + Vector3.new(0, 3, 0)
+            CFG.SPAWN_POS     = c.Position + Vector3.new(0, 3, 0)
             state.spawnCached = true
             return CFG.SPAWN_POS
         end
     end
-    CFG.SPAWN_POS   = hrp.Position
+    CFG.SPAWN_POS     = hrp.Position
     state.spawnCached = true
     return CFG.SPAWN_POS
 end
 
-local function set_speed(s) hum.WalkSpeed = s end
+local function set_speed(s)
+    if hum and hum.Parent then
+        pcall(function() hum.WalkSpeed = s end)
+    end
+end
 
 local noclipConn
 local function noclip_enable()
     if noclipConn then return end
     noclipConn = RunService.Stepped:Connect(function()
         if not CFG.NOCLIP then return end
+        if not char or not char.Parent then return end
         for _, p in ipairs(char:GetDescendants()) do
             if p:IsA("BasePart") then p.CanCollide = false end
         end
@@ -85,7 +106,6 @@ end
 
 local function push_status(msg)
     print("[AutoFarm] " .. msg)
-    -- update Rayfield paragraph if ref exists
     if state.statusLabel then
         pcall(function()
             state.statusLabel:Set("**Status:** " .. msg)
@@ -128,8 +148,10 @@ local function get_rarity(model)
            or model:GetAttribute("rarity")
            or model:GetAttribute("Tier")
     if a then return tostring(a) end
+
     local v = model:FindFirstChild("Rarity") or model:FindFirstChild("rarity")
     if v and v:IsA("StringValue") then return v.Value end
+
     for _, d in ipairs(model:GetDescendants()) do
         if d:IsA("TextLabel") and d.Name:lower():find("rarity") then
             return d.Text
@@ -140,8 +162,10 @@ end
 local function is_worth_keeping(model, level)
     local r = get_rarity(model)
     if not r then return false end
-    r = r:gsub("[%[%]%(%)%d%%]",""):match("^%s*(.-)%s*$")
-    return (LEVEL_FILTERS[level] or CFG.GOOD_RARITIES)[r] == true
+    r = r:gsub("[%[%]%(%)%d%%]", ""):match("^%s*(.-)%s*$")
+    if not r or r == "" then return false end
+    local filter = LEVEL_FILTERS[level] or CFG.GOOD_RARITIES
+    return filter[r] == true
 end
 
 local function find_real_character(roundFolder)
@@ -149,12 +173,15 @@ local function find_real_character(roundFolder)
         if obj:IsA("Model") then
             local a = obj:GetAttribute("IsReal") or obj:GetAttribute("Real") or obj:GetAttribute("Correct")
             if a == true then return obj end
+
             local bv = obj:FindFirstChild("IsReal") or obj:FindFirstChild("Real")
             if bv and bv:IsA("BoolValue") and bv.Value then return obj end
+
             local nl = obj.Name:lower()
             if nl:find("real") and not nl:find("fake") then return obj end
         end
     end
+
     local candidates = {}
     for _, obj in ipairs(roundFolder:GetDescendants()) do
         if obj:IsA("Model") and obj:FindFirstChildWhichIsA("Humanoid") then
@@ -162,29 +189,60 @@ local function find_real_character(roundFolder)
         end
     end
     if #candidates == 1 then return candidates[1] end
+
     for _, m in ipairs(candidates) do
         for _, d in ipairs(m:GetDescendants()) do
             if d:IsA("BodyVelocity") or d:IsA("BodyPosition") then return m end
         end
     end
+
+    return candidates[1]
+end
+
+-- ── INTERACT (Delta-aware) ───────────────────────────
+local function fire_prompt(pp)
+    if fireproximityprompt then
+        pcall(function() fireproximityprompt(pp) end)
+    else
+        pcall(function()
+            pp:InputHoldBegin()
+            task.wait(pp.HoldDuration or 0)
+            pp:InputHoldEnd()
+        end)
+    end
+end
+
+local function fire_click(cd)
+    if fireclickdetector then
+        pcall(function() fireclickdetector(cd) end)
+    end
 end
 
 local function interact_with(target)
     local root = target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart")
-    if not root then return end
-    hrp.CFrame = CFrame.new(root.Position + Vector3.new(0,0,3))
+    if not root then return false end
+
+    hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, 0, 3))
     task.wait(0.1)
-    local cd = target:FindFirstChildWhichIsA("ClickDetector",true)
-    if cd then fireclickdetector(cd); return end
-    local pp = target:FindFirstChildWhichIsA("ProximityPrompt",true)
-    if pp then fireproximityprompt(pp); return end
-    for i = 1, 3 do
-        hrp.CFrame = CFrame.new(root.Position + Vector3.new(0,1,0))
+
+    local cd = target:FindFirstChildWhichIsA("ClickDetector", true)
+    if cd then fire_click(cd); return true end
+
+    local pp = target:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if pp then fire_prompt(pp); return true end
+
+    for _ = 1, 3 do
+        if not hrp or not hrp.Parent then break end
+        hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, 1, 0))
         task.wait(0.05)
     end
+    return true
 end
 
 local function collect_nearby_drops()
+    local myPos = hrp and hrp.Position
+    if not myPos then return end
+
     for _, fname in ipairs({"Drops","Rewards","Characters","Collectibles","Orbs"}) do
         local folder = workspace:FindFirstChild(fname)
         if folder then
@@ -195,22 +253,25 @@ local function collect_nearby_drops()
                 elseif item:IsA("BasePart") then
                     pos = item.Position
                 end
-                if pos and (hrp.Position - pos).Magnitude <= CFG.COLLECT_RADIUS then
-                    hrp.CFrame = CFrame.new(pos + Vector3.new(0,2,0))
+                if pos and (myPos - pos).Magnitude <= CFG.COLLECT_RADIUS then
+                    hrp.CFrame = CFrame.new(pos + Vector3.new(0, 2, 0))
                     task.wait(0.05)
+                    myPos = hrp.Position
                 end
             end
         end
     end
+
     for _, obj in ipairs(workspace:GetChildren()) do
         local tag = obj:GetAttribute("IsPickup") or obj:GetAttribute("Collectible")
         if tag then
             local pos
             if obj:IsA("Model") and obj.PrimaryPart then pos = obj.PrimaryPart.Position
             elseif obj:IsA("BasePart") then pos = obj.Position end
-            if pos and (hrp.Position - pos).Magnitude <= CFG.COLLECT_RADIUS then
-                hrp.CFrame = CFrame.new(pos + Vector3.new(0,2,0))
+            if pos and (myPos - pos).Magnitude <= CFG.COLLECT_RADIUS then
+                hrp.CFrame = CFrame.new(pos + Vector3.new(0, 2, 0))
                 task.wait(0.05)
+                myPos = hrp.Position
             end
         end
     end
@@ -218,13 +279,19 @@ end
 
 -- ── MAIN FARM LOOP ───────────────────────────────────
 local function run_farm()
+    if state.running then return end
     state.running = true
     set_speed(CFG.SPEED)
     if CFG.NOCLIP then noclip_enable() end
     local spawnPos = get_spawn()
-    push_status("Farm started ▶")
+    push_status("Farm started")
 
     while state.running and CFG.ENABLED do
+        if not hrp or not hrp.Parent or not hum or not hum.Parent then
+            task.wait(0.5)
+            continue
+        end
+
         local level = get_current_level()
         state.currentLevel = level
 
@@ -235,7 +302,7 @@ local function run_farm()
             continue
         end
 
-        push_status(("Level %d | Rounds: %d | Good: %d"):format(
+        push_status(("Lvl %d | Rounds: %d | Good: %d"):format(
             level, state.totalRounds, state.collectedGood))
 
         local rf = get_round_folder()
@@ -246,31 +313,19 @@ local function run_farm()
             interact_with(realChar)
             task.wait(0.3)
             collect_nearby_drops()
-
-            local dropsFolder = workspace:FindFirstChild("Drops")
-                             or workspace:FindFirstChild("Rewards")
-            if dropsFolder then
-                for _, drop in ipairs(dropsFolder:GetChildren()) do
-                    if drop:IsA("Model") and is_worth_keeping(drop, level) then
-                        interact_with(drop)
-                        state.collectedGood += 1
-                        push_status(("✓ Kept %s [Lvl %d] — Total: %d"):format(
-                            drop.Name, level, state.collectedGood))
-                    end
-                end
-            end
             state.totalRounds += 1
         end
 
         task.wait(CFG.ROUND_WAIT)
     end
 
-    -- return to spawn on stop
-    hrp.CFrame = CFrame.new(get_spawn())
+    if hrp and hrp.Parent then
+        hrp.CFrame = CFrame.new(get_spawn())
+    end
     set_speed(16)
     noclip_disable()
     state.running = false
-    push_status("Stopped — returned to spawn ✦")
+    push_status("Stopped")
 end
 
 -- ── RESPAWN HANDLER ──────────────────────────────────
@@ -279,8 +334,7 @@ lp.CharacterAdded:Connect(function(nc)
     hrp  = nc:WaitForChild("HumanoidRootPart")
     hum  = nc:WaitForChild("Humanoid")
     state.spawnCached = false
-    if CFG.ENABLED then
-        state.running = false
+    if CFG.ENABLED and not state.running then
         task.wait(1)
         task.spawn(run_farm)
     end
@@ -289,32 +343,44 @@ end)
 -- ══════════════════════════════════════════════════════
 --  RAYFIELD UI
 -- ══════════════════════════════════════════════════════
-local Window = Rayfield:CreateWindow({
-    Name             = "Spot the Fake • Anime",
-    Icon             = 0,          -- Rayfield default icon
-    LoadingTitle     = "Anime AutoFarm",
-    LoadingSubtitle  = "by spinach",
-    Theme            = "Default",
-    DisableRayfieldPrompts = false,
-    DisableBuildWarnings   = true,
-    ConfigurationSaving = {
-        Enabled  = true,
-        FileName = "SpotFakeAnime",
-    },
-    KeySystem = false,
-})
+warn("[SpotFake] building UI...")
 
--- ── TAB: Main ────────────────────────────────────────
-local TabMain = Window:CreateTab("⚔️ Auto Farm", 4483362458)
+local okW, WindowOrErr = pcall(function()
+    return Rayfield:CreateWindow({
+        Name                   = "Spot the Fake - Anime",
+        Icon                   = 4483362458,
+        LoadingTitle           = "Anime AutoFarm",
+        LoadingSubtitle        = "by spinach",
+        Theme                  = "Default",
+        DisableRayfieldPrompts = false,
+        DisableBuildWarnings   = true,
+        ConfigurationSaving    = { Enabled = false },
+        KeySystem              = false,
+    })
+end)
+if not okW then
+    warn("[SpotFake] CreateWindow failed: " .. tostring(WindowOrErr))
+    return
+end
+local Window = WindowOrErr
+warn("[SpotFake] window created OK")
 
--- Status paragraph (live)
+local okT, TabOrErr = pcall(function()
+    return Window:CreateTab("Auto Farm", 4483362458)
+end)
+if not okT then
+    warn("[SpotFake] CreateTab failed: " .. tostring(TabOrErr))
+    return
+end
+local TabMain = TabOrErr
+
+-- ── TAB: Auto Farm ───────────────────────────────────
 local StatusEl = TabMain:CreateParagraph({
-    Title     = "Status",
-    Content   = "**Status:** Waiting to start...",
+    Title   = "Status",
+    Content = "**Status:** Waiting to start...",
 })
 state.statusLabel = StatusEl
 
--- Master toggle
 TabMain:CreateToggle({
     Name         = "Enable AutoFarm",
     CurrentValue = false,
@@ -325,14 +391,12 @@ TabMain:CreateToggle({
             task.spawn(run_farm)
         else
             state.running = false
-            CFG.ENABLED   = false
         end
     end,
 })
 
 TabMain:CreateDivider()
 
--- Speed slider
 TabMain:CreateSlider({
     Name         = "Walk Speed",
     Range        = {16, 250},
@@ -346,7 +410,6 @@ TabMain:CreateSlider({
     end,
 })
 
--- Collect radius slider
 TabMain:CreateSlider({
     Name         = "Collect Radius",
     Range        = {4, 30},
@@ -354,12 +417,9 @@ TabMain:CreateSlider({
     Suffix       = "studs",
     CurrentValue = 8,
     Flag         = "CollectRadius",
-    Callback     = function(val)
-        CFG.COLLECT_RADIUS = val
-    end,
+    Callback     = function(val) CFG.COLLECT_RADIUS = val end,
 })
 
--- Round wait slider
 TabMain:CreateSlider({
     Name         = "Round Delay",
     Range        = {0.5, 10},
@@ -367,14 +427,11 @@ TabMain:CreateSlider({
     Suffix       = "sec",
     CurrentValue = 2,
     Flag         = "RoundDelay",
-    Callback     = function(val)
-        CFG.ROUND_WAIT = val
-    end,
+    Callback     = function(val) CFG.ROUND_WAIT = val end,
 })
 
 TabMain:CreateDivider()
 
--- Noclip toggle
 TabMain:CreateToggle({
     Name         = "NoClip",
     CurrentValue = true,
@@ -385,32 +442,33 @@ TabMain:CreateToggle({
     end,
 })
 
--- Return to spawn button
 TabMain:CreateButton({
     Name     = "Return to Spawn Now",
     Callback = function()
-        hrp.CFrame = CFrame.new(get_spawn())
-        push_status("Teleported to spawn manually.")
+        if hrp and hrp.Parent then
+            hrp.CFrame = CFrame.new(get_spawn())
+        end
+        push_status("Teleported to spawn.")
     end,
 })
 
 -- ── TAB: Rarity Filter ───────────────────────────────
-local TabRarity = Window:CreateTab("⭐ Rarity Filter", 4483362458)
+local TabRarity = Window:CreateTab("Rarity Filter", 4483362458)
 
 TabRarity:CreateParagraph({
     Title   = "Level Presets",
-    Content = "Lv 1-4: Legendary+  •  Lv 5-8: Mythical+  •  Lv 9-12: Secret+",
+    Content = "Lv 1-4: Legendary+  |  Lv 5-8: Mythical+  |  Lv 9-12: Secret+",
 })
 
 TabRarity:CreateDivider()
 
 local rarityList = {
-    { name = "Legendary",  flag = "RarityLegendary" },
-    { name = "Mythical",   flag = "RarityMythical"  },
-    { name = "Secret",     flag = "RaritySecret"    },
-    { name = "Divine",     flag = "RarityDivine"    },
-    { name = "Godly",      flag = "RarityGodly"     },
-    { name = "Exclusive",  flag = "RarityExclusive" },
+    { name = "Legendary", flag = "RarityLegendary" },
+    { name = "Mythical",  flag = "RarityMythical"  },
+    { name = "Secret",    flag = "RaritySecret"    },
+    { name = "Divine",    flag = "RarityDivine"    },
+    { name = "Godly",     flag = "RarityGodly"     },
+    { name = "Exclusive", flag = "RarityExclusive" },
 }
 
 for _, r in ipairs(rarityList) do
@@ -420,8 +478,7 @@ for _, r in ipairs(rarityList) do
         Flag         = r.flag,
         Callback     = function(val)
             CFG.GOOD_RARITIES[r.name] = val
-            -- sync into level filters
-            for lvl, filter in pairs(LEVEL_FILTERS) do
+            for _, filter in pairs(LEVEL_FILTERS) do
                 if val then
                     filter[r.name] = true
                 else
@@ -433,20 +490,19 @@ for _, r in ipairs(rarityList) do
 end
 
 -- ── TAB: Stats ───────────────────────────────────────
-local TabStats = Window:CreateTab("📊 Stats", 4483362458)
+local TabStats = Window:CreateTab("Stats", 4483362458)
 
 local StatsEl = TabStats:CreateParagraph({
     Title   = "Session Stats",
     Content = "No data yet.",
 })
 
--- refresh stats every 3 s
 task.spawn(function()
     while true do
         task.wait(3)
         pcall(function()
             StatsEl:Set(
-                ("**Level:** %d / %d\n**Rounds:** %d\n**Good Characters:** %d\n**Running:** %s")
+                ("**Level:** %d / %d\n**Rounds:** %d\n**Good:** %d\n**Running:** %s")
                 :format(
                     state.currentLevel,
                     CFG.MAX_LEVEL,
@@ -465,16 +521,19 @@ TabStats:CreateButton({
         state.totalRounds   = 0
         state.collectedGood = 0
         push_status("Stats reset.")
-        Rayfield:Notify({
-            Title    = "Stats Reset",
-            Content  = "Round counter and good-character count cleared.",
-            Duration = 3,
-        })
+        pcall(function()
+            Rayfield:Notify({
+                Title    = "Stats Reset",
+                Content  = "Counters cleared.",
+                Duration = 3,
+                Image    = 4483362458,
+            })
+        end)
     end,
 })
 
 -- ── TAB: Settings ────────────────────────────────────
-local TabSettings = Window:CreateTab("⚙️ Settings", 4483362458)
+local TabSettings = Window:CreateTab("Settings", 4483362458)
 
 TabSettings:CreateSlider({
     Name         = "Max Level",
@@ -483,9 +542,7 @@ TabSettings:CreateSlider({
     Suffix       = "",
     CurrentValue = 12,
     Flag         = "MaxLevel",
-    Callback     = function(val)
-        CFG.MAX_LEVEL = val
-    end,
+    Callback     = function(val) CFG.MAX_LEVEL = val end,
 })
 
 TabSettings:CreateDivider()
@@ -495,16 +552,18 @@ TabSettings:CreateButton({
     Callback = function()
         CFG.ENABLED   = false
         state.running = false
-        Rayfield:Destroy()
+        pcall(function() Rayfield:Destroy() end)
     end,
 })
 
 -- ── READY NOTIFICATION ───────────────────────────────
-Rayfield:Notify({
-    Title    = "Spot the Fake • Anime",
-    Content  = "UI loaded. Toggle Auto Farm to begin.",
-    Duration = 5,
-    Image    = 4483362458,
-})
+pcall(function()
+    Rayfield:Notify({
+        Title    = "Spot the Fake - Anime",
+        Content  = "UI loaded. Toggle AutoFarm to begin.",
+        Duration = 5,
+        Image    = 4483362458,
+    })
+end)
 
-Rayfield:LoadConfiguration()
+warn("[SpotFake] done")
