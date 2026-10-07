@@ -4,10 +4,13 @@
 --  GUI: กล่องกลางจอ ลากได้ | dump เสร็จ → ปิดอัตโนมัติ
 -- ============================================================
 
+warn("[MapDumper] script started")
+
 local HttpService       = game:GetService("HttpService")
 local UserInputService  = game:GetService("UserInputService")
 local TweenService      = game:GetService("TweenService")
 local CollectionService = game:GetService("CollectionService")
+local Players           = game:GetService("Players")
 
 -- ────────────────── CONFIG ──────────────────
 local CONFIG = {
@@ -15,13 +18,13 @@ local CONFIG = {
     DumpWorkspace          = true,
     DumpReplicatedStorage  = true,
     DumpPlayers            = false,
-    MaxDepth               = 8,       -- จำกัดความลึก กัน OOM
-    MaxNodes               = 200000,  -- เพดานจำนวน node ทั้งหมด
-    IncludeScripts         = false,   -- ปิดเพื่อลดขนาด dump
+    MaxDepth               = 8,
+    MaxNodes               = 200000,
+    IncludeScripts         = false,
     IncludeAttributes      = true,
     IncludeTags            = true,
-    IncludeDescendantCount = false,   -- ปิด กัน O(n^2)
-    SkipClasses = {                   -- ข้าม instance ที่ไม่จำเป็น / ใหญ่มาก
+    IncludeDescendantCount = false,
+    SkipClasses = {
         Terrain = true,
         Camera  = true,
     },
@@ -176,7 +179,6 @@ local function dumpInstance(inst, depth)
     if depth > CONFIG.MaxDepth then return nil end
     if nodeCount >= CONFIG.MaxNodes then return nil end
 
-    -- ข้ามคลาสที่กำหนด
     local okCls, cls = pcall(function() return inst.ClassName end)
     if okCls and CONFIG.SkipClasses[cls] then return nil end
 
@@ -197,7 +199,6 @@ local function dumpInstance(inst, depth)
     local tags = getTags(inst)
     if tags then node.tags = tags end
 
-    -- visibility snapshot
     local visibility = {}
     local transparency = safeGet(inst, "Transparency")
     local enabled = safeGet(inst, "Enabled")
@@ -210,7 +211,6 @@ local function dumpInstance(inst, depth)
     end
     if next(visibility) then node.visibility = visibility end
 
-    -- children
     local okCh, children = pcall(function() return inst:GetChildren() end)
     if okCh and children and #children > 0 then
         node.children = {}
@@ -329,7 +329,7 @@ local function runDump(onProgress)
     local targets = {}
     if CONFIG.DumpWorkspace         then table.insert(targets, workspace) end
     if CONFIG.DumpReplicatedStorage then table.insert(targets, game:GetService("ReplicatedStorage")) end
-    if CONFIG.DumpPlayers           then table.insert(targets, game:GetService("Players")) end
+    if CONFIG.DumpPlayers           then table.insert(targets, Players) end
 
     for i, root in ipairs(targets) do
         onProgress("กำลัง dump " .. root.Name .. "…", i / #targets * 0.9)
@@ -351,7 +351,6 @@ local function runDump(onProgress)
         return HttpService:JSONEncode(safeOutput)
     end)
 
-    -- fallback: strip deep metadata จาก safe copy แล้ว encode อีกครั้ง
     if not ok2 then
         local function stripDeep(node)
             if type(node) ~= "table" then return node end
@@ -389,7 +388,24 @@ end
 
 -- ────────────────── GUI ──────────────────
 local function makeGui()
-    local old = game.CoreGui:FindFirstChild("MapDumperGui")
+    -- หา parent ที่ปลอดภัย (PlayerGui ก่อน CoreGui)
+    local parentGui
+    local okPG, pg = pcall(function()
+        return Players.LocalPlayer:WaitForChild("PlayerGui", 5)
+    end)
+    if okPG and pg then
+        parentGui = pg
+    else
+        local okCG, cg = pcall(function() return game.CoreGui end)
+        if okCG and cg then
+            parentGui = cg
+        else
+            warn("[MapDumper] หา GUI parent ไม่ได้")
+            return
+        end
+    end
+
+    local old = parentGui:FindFirstChild("MapDumperGui")
     if old then old:Destroy() end
 
     local sg = Instance.new("ScreenGui")
@@ -397,7 +413,8 @@ local function makeGui()
     sg.ResetOnSpawn   = false
     sg.IgnoreGuiInset = true
     sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    sg.Parent         = game.CoreGui
+    sg.DisplayOrder   = 999
+    sg.Parent         = parentGui
 
     local W, H = 300, 190
     local panel = Instance.new("Frame")
@@ -584,7 +601,7 @@ local function makeGui()
         task.spawn(function()
             local ok, a, b = pcall(runDump, onProgress)
             if ok then
-                barFill.Back,groundColor3 = Color3.fromRGB(40, 200, 110)
+                barFill.BackgroundColor3 = Color3.fromRGB(40, 200, 110)
                 TweenService:Create(barFill, TweenInfo.new(0.3), {
                     Size = UDim2.new(1, 0, 1, 0)
                 }):Play()
@@ -592,7 +609,7 @@ local function makeGui()
                 statusLbl.Text       = "✅  dump สำเร็จ!"
                 statusLbl.TextColor3 = Color3.fromRGB(100, 230, 150)
                 infoLbl.Text         = string.format("%.2f วินาที  •  %s",
-                    a (b >= 1048576 and string.format("%.2f MB", b/1048576)
+                    a, (b >= 1048576 and string.format("%.2f MB", b/1048576)
                         or string.format("%.1f KB", b/1024)))
                 btn.Text             = "✅  เสร็จแล้ว"
                 btn.BackgroundColor3 = Color3.fromRGB(30, 170, 80)
@@ -602,7 +619,6 @@ local function makeGui()
 
                 task.wait(2)
                 closePanel()
-                -- ไม่เรียก game:Shutdown() เพราะไม่มีผลบน client
             else
                 barFill.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
                 statusLbl.Text       = "❌  " .. tostring(a):sub(1, 60)
@@ -617,4 +633,8 @@ local function makeGui()
     end)
 end
 
-makeGui()
+-- ── launch ──
+local okGui, guiErr = pcall(makeGui)
+if not okGui then
+    warn("[MapDumper] makeGui error: " .. tostring(guiErr))
+end
