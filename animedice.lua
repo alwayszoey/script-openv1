@@ -97,7 +97,7 @@ local State = {
 
 	tower = "Hidden Leaf Tower",
 	towerBest = true,
-	towerFloors = 6,
+	towerFloors = 10,
 	towerDelay = 1.5,
 	autoTower = false,
 	towerThread = nil,
@@ -397,7 +397,11 @@ local TOWERS = {
 	"Hidden Leaf Tower",
 	"Slayer Tower",
 	"Shadow Tower",
+	"Infinity Tower",
 }
+
+-- Floors per run (PlayTower takes only the name, floors = CompleteTowerFloor calls).
+local MAX_FLOORS = 100
 
 -- Config file so the script resumes itself after a rejoin.
 local SAVE_FOLDER = "AxionHub"
@@ -490,7 +494,7 @@ local function loadConfig()
 		State.towerBest = saved.towerBest
 	end
 	if type(saved.towerFloors) == "number" then
-		State.towerFloors = math.clamp(math.floor(saved.towerFloors), 1, 30)
+		State.towerFloors = math.clamp(math.floor(saved.towerFloors), 1, MAX_FLOORS)
 	end
 
 	return saved
@@ -1093,6 +1097,93 @@ local function makeToggle(parent, y, title, defaultOn, callback)
 	}
 end
 
+---Build a draggable slider (integer values) and return its setter.
+---@param parent Instance
+---@param position UDim2
+---@param minValue number
+---@param maxValue number
+---@param initial number
+---@param onChange function
+---@param onRelease function
+---@return function
+local function makeSlider(parent, position, minValue, maxValue, initial, onChange, onRelease)
+	local sliderTrack = Instance.new("TextButton")
+	sliderTrack.Size = UDim2.new(1, -28, 0, 10)
+	sliderTrack.Position = position
+	sliderTrack.BackgroundColor3 = Config.track
+	sliderTrack.BorderSizePixel = 0
+	sliderTrack.Text = ""
+	sliderTrack.AutoButtonColor = false
+	sliderTrack.ZIndex = 4
+	sliderTrack.Parent = parent
+	createCorner(sliderTrack, 999)
+
+	local fill = Instance.new("Frame")
+	fill.BackgroundColor3 = WHITE
+	fill.BorderSizePixel = 0
+	fill.ZIndex = 5
+	fill.Parent = sliderTrack
+	createCorner(fill, 999)
+	createGradient(fill, 0, accentSequence())
+
+	local knob = Instance.new("Frame")
+	knob.Size = UDim2.new(0, 16, 0, 16)
+	knob.BackgroundColor3 = WHITE
+	knob.BorderSizePixel = 0
+	knob.ZIndex = 6
+	knob.Parent = sliderTrack
+	createCorner(knob, 999)
+	createStroke(knob, 2, 0)
+
+	local dragging = false
+
+	local function setValue(value, silent)
+		value = math.clamp(math.floor(value + 0.5), minValue, maxValue)
+
+		local relative = (value - minValue) / (maxValue - minValue)
+		fill.Size = UDim2.new(relative, 0, 1, 0)
+		knob.Position = UDim2.new(relative, -8, 0.5, -8)
+
+		if not silent then
+			onChange(value)
+		end
+	end
+
+	local function setFromX(x)
+		local relative = math.clamp((x - sliderTrack.AbsolutePosition.X) / sliderTrack.AbsoluteSize.X, 0, 1)
+		setValue(minValue + relative * (maxValue - minValue))
+	end
+
+	track(sliderTrack.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			setFromX(input.Position.X)
+		end
+	end))
+
+	track(userInputService.InputChanged:Connect(function(input)
+		if
+			dragging
+			and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch)
+		then
+			setFromX(input.Position.X)
+		end
+	end))
+
+	track(userInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			if dragging and onRelease then
+				onRelease()
+			end
+
+			dragging = false
+		end
+	end))
+
+	setValue(initial, true)
+	return setValue
+end
+
 ---Build a group of capsule chips laid out in a grid.
 ---@param parent Instance
 ---@param options table
@@ -1449,7 +1540,7 @@ local function buildUI()
 	-- Dungeon page.
 	local dungeonPage, dungeonStatus = makePage("DUNGEON", "🗡 OFF")
 
-	local towerCard = makeCard(dungeonPage, UDim2.new(1, -36, 0, 100), UDim2.new(0, 18, 0, 70))
+	local towerCard = makeCard(dungeonPage, UDim2.new(1, -36, 0, 132), UDim2.new(0, 18, 0, 70))
 
 	makeLabel(towerCard, "SELECT DUNGEON", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
 
@@ -1471,7 +1562,7 @@ local function buildUI()
 		end
 	)
 
-	local towerToggles = makeCard(dungeonPage, UDim2.new(1, -36, 0, 92), UDim2.new(0, 18, 0, 180))
+	local towerToggles = makeCard(dungeonPage, UDim2.new(1, -36, 0, 92), UDim2.new(0, 18, 0, 210))
 
 	makeToggle(towerToggles, 4, "🧬 Best Team", State.towerBest, function(value)
 		State.towerBest = value
@@ -1489,7 +1580,7 @@ local function buildUI()
 		saveConfig()
 	end)
 
-	makeLabel(dungeonPage, "ยืนอยู่ที่ base ได้เลย ระบบจัดทีมและเข้าด่านให้เอง", UDim2.new(1, -36, 0, 14), UDim2.new(0, 22, 0, 282), Config.font, 10, Config.muted)
+	makeLabel(dungeonPage, "ยืนอยู่ที่ base ได้เลย ระบบจัดทีมและเข้าด่านให้เอง", UDim2.new(1, -36, 0, 14), UDim2.new(0, 22, 0, 310), Config.font, 10, Config.muted)
 
 	-- Claim page.
 	local claimPage, claimStatus = makePage("CLAIM", "🎁 quest: 0 · daily: 0")
@@ -1588,21 +1679,38 @@ local function buildUI()
 		end
 	)
 
-	local floorCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 80), UDim2.new(0, 18, 0, 262))
+	local floorCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 82), UDim2.new(0, 18, 0, 262))
 
-	makeLabel(floorCard, "DUNGEON FLOORS / RUN", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
+	makeLabel(floorCard, "DUNGEON FLOORS / RUN", UDim2.new(0.6, 0, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
 
-	makeLabel(floorCard, "จำนวนชั้นที่เคลียร์ต่อรอบ", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 26), Config.font, 10, Config.text)
+	local floorValue = makeLabel(floorCard, "", UDim2.new(0.4, -14, 0, 14), UDim2.new(0.6, 0, 0, 8), Config.fontBold, 11, Config.text, Enum.TextXAlignment.Right)
 
-	makeChipGroup(
+	local floorChips
+
+	local setFloors = makeSlider(
 		floorCard,
-		{ { key = 6, text = "6" }, { key = 10, text = "10" }, { key = 15, text = "15" } },
-		{ columns = 3, x = 14, y = 46, width = 56, height = 26, gap = 6, textSize = 10 },
+		UDim2.new(0, 14, 0, 32),
+		1,
+		MAX_FLOORS,
+		State.towerFloors,
+		function(value)
+			State.towerFloors = value
+			floorValue.Text = value .. " floors"
+			floorChips.refresh()
+		end,
+		saveConfig
+	)
+	floorValue.Text = State.towerFloors .. " floors"
+
+	floorChips = makeChipGroup(
+		floorCard,
+		{ { key = 10, text = "10" }, { key = 50, text = "50" }, { key = 100, text = "100" } },
+		{ columns = 3, x = 14, y = 50, width = 56, height = 24, gap = 6, textSize = 10 },
 		function(key)
 			return key == State.towerFloors
 		end,
 		function(key)
-			State.towerFloors = key
+			setFloors(key)
 			saveConfig()
 		end
 	)
