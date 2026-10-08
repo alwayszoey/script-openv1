@@ -1,62 +1,71 @@
 --[[
     AxionHub AutoDice v11
-    Changelog v10 → v11:
-      ✔ ลบเงาขาวออกจาก Card (เหลือแค่ที่ toggle)
-      ✔ Content bg โปร่งใสขึ้น + blur นุ่ม
-      ✔ รวม MODE + Auto Roll เป็นการ์ดเดียว
-      ✔ Card gradient ม่วงดำล้วน ไม่มี highlight ทับ
+    Fullstack Developer Edition
 --]]
 
-local Players           = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService        = game:GetService("RunService")
-local TweenService      = game:GetService("TweenService")
-local UserInputService  = game:GetService("UserInputService")
-local Lighting          = game:GetService("Lighting")
-local Workspace         = game:GetService("Workspace")
-
-local LP = Players.LocalPlayer
-local RS = ReplicatedStorage
-
-print("[AxionHub] ===== v11 starting =====")
-
---=====================================================================
--- THEME
---=====================================================================
-local Theme = {
-    Bg1      = Color3.fromRGB(14,  4,  26),
-    Bg2      = Color3.fromRGB(7,   2,  14),
-    Bg3      = Color3.fromRGB(0,   0,  0),
-
-    Card1    = Color3.fromRGB(72,  28, 118),
-    Card2    = Color3.fromRGB(42,  14, 80),
-    Card3    = Color3.fromRGB(18,  4,  36),
-
-    Sidebar1 = Color3.fromRGB(62,  24, 108),
-    Sidebar2 = Color3.fromRGB(34,  12, 62),
-
-    TogOffL  = Color3.fromRGB(14,  4,  24),
-    TogOffR  = Color3.fromRGB(50,  20, 84),
-    TogOnL   = Color3.fromRGB(28,  6,  50),
-    TogOnR   = Color3.fromRGB(168, 85, 247),
-
-    Accent   = Color3.fromRGB(168, 85, 247),
-    Accent2  = Color3.fromRGB(124, 58, 237),
-    AccentLt = Color3.fromRGB(222, 192, 255),
-
-    Text     = Color3.fromRGB(248, 244, 255),
-    TextDim  = Color3.fromRGB(200, 180, 235),
-    Muted    = Color3.fromRGB(150, 128, 190),
-
-    Good     = Color3.fromRGB(130, 255, 180),
-    Bad      = Color3.fromRGB(255, 100, 130),
-    Gold     = Color3.fromRGB(255, 200, 80),
+local Services = {
+    Players = game:GetService("Players"),
+    ReplicatedStorage = game:GetService("ReplicatedStorage"),
+    RunService = game:GetService("RunService"),
+    TweenService = game:GetService("TweenService"),
+    UserInputService = game:GetService("UserInputService"),
+    Lighting = game:GetService("Lighting"),
 }
 
---=====================================================================
--- SAFE
---=====================================================================
-local function getSafeGuiParent()
+local LP = Services.Players.LocalPlayer
+local RS = Services.ReplicatedStorage
+local Tween = Services.TweenService
+local UIS = Services.UserInputService
+local Lighting = Services.Lighting
+
+local Config = {
+    Name = "AxionHub_AutoDice",
+    Version = "v11",
+    Accent = Color3.fromRGB(168, 85, 247),
+    AccentDim = Color3.fromRGB(124, 58, 237),
+    AccentLight = Color3.fromRGB(222, 192, 255),
+    BgTop = Color3.fromRGB(14, 4, 26),
+    BgBot = Color3.fromRGB(0, 0, 0),
+    CardTop = Color3.fromRGB(56, 22, 96),
+    CardMid = Color3.fromRGB(34, 12, 64),
+    CardBot = Color3.fromRGB(18, 6, 36),
+    SidebarTop = Color3.fromRGB(62, 24, 108),
+    SidebarBot = Color3.fromRGB(28, 10, 52),
+    ToggleOff = Color3.fromRGB(22, 8, 42),
+    ToggleOn = Color3.fromRGB(168, 85, 247),
+    Text = Color3.fromRGB(248, 244, 255),
+    TextDim = Color3.fromRGB(200, 180, 235),
+    Muted = Color3.fromRGB(140, 118, 178),
+    Good = Color3.fromRGB(130, 255, 180),
+    Bad = Color3.fromRGB(255, 100, 130),
+    Gold = Color3.fromRGB(255, 200, 80),
+    Font = Enum.Font.Gotham,
+    FontBold = Enum.Font.GothamBold,
+    FontMedium = Enum.Font.GothamMedium,
+}
+
+local State = {
+    page = "MAIN",
+    mode = "AUTO",
+    running = false,
+    rolls = 0,
+    autoRollOn = false,
+    thread = nil,
+    spamSpeed = 0.03,
+    bypassAnim = true,
+    killCutscene = true,
+    autoCollect = false,
+    collectThread = nil,
+    collectRate = 0.5,
+    plotMin = 1,
+    plotMax = 16,
+    collected = 0,
+    lastPlot = 0,
+    collectStarted = false,
+    minimized = false,
+}
+
+local function getSafeParent()
     if type(gethui) == "function" then
         local ok, h = pcall(gethui)
         if ok and h then return h end
@@ -75,49 +84,17 @@ local function safeFind(root, ...)
     return node
 end
 
-local RollDice    = safeFind(RS, "Network", "RollService", "RF", "RollDice")
-local SetAutoRoll = safeFind(RS, "Network", "RollService", "RE", "SetAutoRoll")
-local RollMessage = safeFind(RS, "Network", "RollService", "RE", "RollMessage")
-local CollectBalance = safeFind(RS, "Network", "PlotService", "RE", "CollectBalance")
-
-print("[AxionHub] RollDice       =", RollDice)
-print("[AxionHub] SetAutoRoll    =", SetAutoRoll)
-print("[AxionHub] CollectBalance =", CollectBalance)
-
-local remotesReady = RollDice ~= nil and SetAutoRoll ~= nil
-local collectReady = CollectBalance ~= nil
-
---=====================================================================
--- STATE
---=====================================================================
-local State = {
-    page         = "MAIN",
-    mode         = "AUTO",
-    running      = false,
-    rolls        = 0,
-    autoRollOn   = false,
-    thread       = nil,
-    spamSpeed    = 0.03,
-    bypassAnim   = true,
-    killCutscene = true,
-    results      = {},
-
-    autoCollect   = false,
-    collectThread = nil,
-    collectRate   = 0.5,
-    plotMin       = 1,
-    plotMax       = 16,
-    collected     = 0,
-    lastPlot      = 0,
-    collectStarted= false,
-
-    minimized    = false,
+local Remotes = {
+    RollDice = safeFind(RS, "Network", "RollService", "RF", "RollDice"),
+    SetAutoRoll = safeFind(RS, "Network", "RollService", "RE", "SetAutoRoll"),
+    RollMessage = safeFind(RS, "Network", "RollService", "RE", "RollMessage"),
+    CollectBalance = safeFind(RS, "Network", "PlotService", "RE", "CollectBalance"),
 }
 
---=====================================================================
--- 🎬 ANIMATION BYPASS
---=====================================================================
-local antiFX = { camModel=nil, cutscene=nil, rollingDir=nil, ccEffects={} }
+local remotesReady = Remotes.RollDice ~= nil and Remotes.SetAutoRoll ~= nil
+local collectReady = Remotes.CollectBalance ~= nil
+
+local antiFX = { camModel = nil, cutscene = nil, rollingDir = nil, ccEffects = {} }
 
 local function initAntiFX()
     local rolling = safeFind(RS, "Framework", "Features", "Rolling")
@@ -130,12 +107,12 @@ local function initAntiFX()
 
     antiFX.ccEffects = {}
     for _, name in ipairs({
-        "VFXImpactFrameWhite","WhiteImpactFrame",
-        "BlackImpactFrame","VFXImpactFrameBlack"
+        "VFXImpactFrameWhite", "WhiteImpactFrame",
+        "BlackImpactFrame", "VFXImpactFrameBlack"
     }) do
         local fx = Lighting:FindFirstChild(name)
         if fx and fx:IsA("PostEffect") then
-            antiFX.ccEffects[#antiFX.ccEffects+1] = fx
+            antiFX.ccEffects[#antiFX.ccEffects + 1] = fx
         end
     end
 
@@ -160,7 +137,6 @@ end
 
 local function tickAntiFX()
     if not State.bypassAnim then return end
-
     if State.killCutscene and antiFX.camModel then
         pcall(function()
             antiFX.camModel.Transparency = 1
@@ -174,11 +150,9 @@ local function tickAntiFX()
             end
         end)
     end
-
     for _, fx in ipairs(antiFX.ccEffects) do
         if fx.Parent and fx.Enabled then fx.Enabled = false end
     end
-
     if antiFX.rollingDir and antiFX.rollingDir.Parent then
         if antiFX.rollingDir.Visible then antiFX.rollingDir.Visible = false end
         for _, c in ipairs(antiFX.rollingDir:GetChildren()) do
@@ -194,35 +168,31 @@ task.spawn(function()
         initAntiFX()
     end
 end)
-RunService.Heartbeat:Connect(tickAntiFX)
+Services.RunService.Heartbeat:Connect(tickAntiFX)
 
---=====================================================================
--- 🎲 ROLL LOGIC
---=====================================================================
 local function doRoll()
-    if not RollDice then return false end
-    local ok = pcall(function() RollDice:InvokeServer() end)
+    if not Remotes.RollDice then return false end
+    local ok = pcall(function() Remotes.RollDice:InvokeServer() end)
     if ok then State.rolls = State.rolls + 1 end
-
     if (State.mode == "AUTO" or State.mode == "BOTH")
-        and not State.autoRollOn and SetAutoRoll then
+        and not State.autoRollOn and Remotes.SetAutoRoll then
         pcall(function()
-            SetAutoRoll:FireServer(true)
+            Remotes.SetAutoRoll:FireServer(true)
             State.autoRollOn = true
         end)
     end
     return ok
 end
 
-local function loop()
+local function diceLoop()
     State.running = true
     while State.running do
         if State.mode == "SPAM" or State.mode == "BOTH" then
             doRoll()
         elseif State.mode == "AUTO" then
-            if not State.autoRollOn and SetAutoRoll then
+            if not State.autoRollOn and Remotes.SetAutoRoll then
                 pcall(function()
-                    SetAutoRoll:FireServer(true)
+                    Remotes.SetAutoRoll:FireServer(true)
                     State.autoRollOn = true
                 end)
             end
@@ -231,41 +201,32 @@ local function loop()
     end
 end
 
-local function start()
+local function startDice()
     if State.running or not remotesReady then return end
-    State.thread = task.spawn(loop)
+    State.thread = task.spawn(diceLoop)
 end
 
-local function stop()
+local function stopDice()
     State.running = false
     if State.thread then pcall(task.cancel, State.thread) end
-    if State.autoRollOn and SetAutoRoll then
-        pcall(function() SetAutoRoll:FireServer(false) end)
+    if State.autoRollOn and Remotes.SetAutoRoll then
+        pcall(function() Remotes.SetAutoRoll:FireServer(false) end)
         State.autoRollOn = false
     end
 end
 
-if RollMessage then
-    RollMessage.OnClientEvent:Connect(function(...)
-        table.insert(State.results, { time = os.time(), args = {...} })
-        if #State.results > 200 then table.remove(State.results, 1) end
-    end)
+if Remotes.RollMessage then
+    Remotes.RollMessage.OnClientEvent:Connect(function() end)
 end
 
---=====================================================================
--- 💰 AFK AUTO COLLECT
---=====================================================================
 local function collectOnePlot(plotNum)
-    if not CollectBalance then return end
-    pcall(function()
-        CollectBalance:FireServer(plotNum)
-    end)
+    if not Remotes.CollectBalance then return end
+    pcall(function() Remotes.CollectBalance:FireServer(plotNum) end)
     State.collected = State.collected + 1
     State.lastPlot = plotNum
 end
 
 local function collectLoop()
-    print("[AxionHub] 💰 collect started")
     while State.autoCollect do
         for plotNum = State.plotMin, State.plotMax do
             if not State.autoCollect then break end
@@ -274,12 +235,10 @@ local function collectLoop()
         end
         task.wait(State.collectRate)
     end
-    print("[AxionHub] 💰 collect stopped")
 end
 
 local function startCollect()
-    if State.collectThread then return end
-    if not collectReady then return end
+    if State.collectThread or not collectReady then return end
     State.autoCollect = true
     State.collectStarted = true
     State.collectThread = task.spawn(collectLoop)
@@ -301,139 +260,141 @@ LP.CharacterAdded:Connect(function()
     end
 end)
 
---=====================================================================
--- 🎨 UI BUILDER
---=====================================================================
 local function buildUI()
-    print("[AxionHub] buildUI() called")
-
-    local parent = getSafeGuiParent()
-    local old = parent:FindFirstChild("AxionHub_AutoDice")
+    local parent = getSafeParent()
+    local old = parent:FindFirstChild(Config.Name)
     if old then old:Destroy() end
 
     local gui = Instance.new("ScreenGui")
-    gui.Name = "AxionHub_AutoDice"
+    gui.Name = Config.Name
     gui.ResetOnSpawn = false
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     gui.IgnoreGuiInset = true
     gui.DisplayOrder = 999
     gui.Parent = parent
 
-    -- ★ Blur นุ่มกว่าเดิม (เบลอนิดๆ)
     local blur = Instance.new("BlurEffect")
     blur.Name = "AxionHubBlur_Internal"
-    blur.Size = 10
+    blur.Size = 12
     blur.Parent = Lighting
     gui.Destroying:Connect(function()
         pcall(function() blur:Destroy() end)
     end)
 
-    --=================================================================
-    -- ★ HELPER: card ม่วงดำล้วน (ไม่มีเงาขาวทับ)
-    --=================================================================
-    local function makeCard(parent, size, pos)
-        local card = Instance.new("Frame")
-        card.Size = size
-        card.Position = pos
-        card.BackgroundColor3 = Color3.fromRGB(20, 6, 38)
-        card.BackgroundTransparency = 0.25      -- ★ โปร่งใสขึ้น
-        card.BorderSizePixel = 0
-        card.Parent = parent
-        Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
-
-        local grad = Instance.new("UIGradient", card)
-        grad.Rotation = 90
-        grad.Color = ColorSequence.new{
-            ColorSequenceKeypoint.new(0.00, Theme.Card1),
-            ColorSequenceKeypoint.new(0.55, Theme.Card2),
-            ColorSequenceKeypoint.new(1.00, Theme.Card3),
-        }
-        grad.Transparency = NumberSequence.new{
-            NumberSequenceKeypoint.new(0.0, 0.15),
-            NumberSequenceKeypoint.new(1.0, 0.55),
-        }
-        return card
+    local function corner(parent, r)
+        local c = Instance.new("UICorner", parent)
+        c.CornerRadius = UDim.new(0, r)
+        return c
     end
 
-    --=================================================================
-    -- ★ HELPER: Toggle (ม่วงไล่เฉด + เงาขาว) — มีแค่ตรงนี้
-    --=================================================================
-    local function makeToggle(parent, y, label, defaultOn, cb, sizeW, sizeH, posX)
-        sizeW = sizeW or 46
-        sizeH = sizeH or 24
-        posX = posX or UDim2.new(1, -60, 0, y)
+    local function gradient(parent, rot, colors)
+        local g = Instance.new("UIGradient", parent)
+        g.Rotation = rot or 90
+        if colors then
+            g.Color = ColorSequence.new(colors)
+        end
+        return g
+    end
 
-        local lbl = Instance.new("TextLabel", parent)
-        lbl.Text = label
-        lbl.Font = Enum.Font.GothamMedium
-        lbl.TextSize = 11.5
-        lbl.TextColor3 = Theme.Text
-        lbl.BackgroundTransparency = 1
-        lbl.Size = UDim2.new(0.75, 0, 0, 20)
-        lbl.Position = UDim2.new(0, 14, 0, y)
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.ZIndex = 4
+    local function toggleGlow(parent)
+        local hl = Instance.new("Frame", parent)
+        hl.Name = "ToggleGlow"
+        hl.Size = UDim2.new(0.6, 0, 0.6, 0)
+        hl.Position = UDim2.new(0, 0, 0, 0)
+        hl.BackgroundColor3 = Color3.fromRGB(255, 240, 255)
+        hl.BackgroundTransparency = 0.35
+        hl.BorderSizePixel = 0
+        hl.ZIndex = 2
+        corner(hl, 999)
 
-        local pill = Instance.new("TextButton", parent)
-        pill.Size = UDim2.new(0, sizeW, 0, sizeH)
-        pill.Position = posX
+        local g = Instance.new("UIGradient", hl)
+        g.Rotation = 135
+        g.Transparency = NumberSequence.new{
+            NumberSequenceKeypoint.new(0.0, 0.25),
+            NumberSequenceKeypoint.new(0.6, 1.0),
+            NumberSequenceKeypoint.new(1.0, 1.0),
+        }
+        g.Color = ColorSequence.new(
+            Color3.fromRGB(255, 245, 255),
+            Color3.fromRGB(255, 255, 255)
+        )
+        return hl
+    end
+
+    local function card(parent, size, pos)
+        local c = Instance.new("Frame")
+        c.Size = size
+        c.Position = pos
+        c.BackgroundColor3 = Config.CardMid
+        c.BorderSizePixel = 0
+        c.ZIndex = 3
+        c.Parent = parent
+        corner(c, 10)
+
+        local g = gradient(c, 90, {
+            ColorSequenceKeypoint.new(0.00, Config.CardTop),
+            ColorSequenceKeypoint.new(0.55, Config.CardMid),
+            ColorSequenceKeypoint.new(1.00, Config.CardBot),
+        })
+        return c
+    end
+
+    local function label(parent, text, size, pos, font, ts, color, align)
+        local l = Instance.new("TextLabel", parent)
+        l.Text = text
+        l.Size = size
+        l.Position = pos
+        l.Font = font or Config.Font
+        l.TextSize = ts or 11
+        l.TextColor3 = color or Config.Text
+        l.BackgroundTransparency = 1
+        l.TextXAlignment = align or Enum.TextXAlignment.Left
+        l.ZIndex = 5
+        return l
+    end
+
+    local function makeToggle(parent, y, title, defaultOn, cb)
+        local row = Instance.new("Frame", parent)
+        row.Size = UDim2.new(1, 0, 0, 40)
+        row.Position = UDim2.new(0, 0, 0, y)
+        row.BackgroundTransparency = 1
+        row.ZIndex = 4
+
+        label(row, title, UDim2.new(0.75, 0, 1, 0), UDim2.new(0, 14, 0, 0),
+            Config.FontMedium, 11.5, Config.Text)
+
+        local pill = Instance.new("TextButton", row)
+        pill.Size = UDim2.new(0, 46, 0, 24)
+        pill.Position = UDim2.new(1, -60, 0.5, -12)
         pill.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
         pill.Text = ""
         pill.AutoButtonColor = false
-        pill.ZIndex = 4
-        Instance.new("UICorner", pill).CornerRadius = UDim.new(1, 0)
+        pill.ZIndex = 5
+        corner(pill, 999)
 
-        -- Gradient ม่วงไล่เฉด
-        local grad = Instance.new("UIGradient", pill)
-        grad.Rotation = 0
-        grad.Color = defaultOn and ColorSequence.new{
-            ColorSequenceKeypoint.new(0.0, Theme.TogOnL),
-            ColorSequenceKeypoint.new(1.0, Theme.TogOnR),
-        } or ColorSequence.new{
-            ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
-            ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
-        }
+        local pillGrad = gradient(pill, 0)
+        pillGrad.Color = defaultOn and ColorSequence.new(Config.ToggleOn, Config.AccentDim)
+            or ColorSequence.new(Config.ToggleOff, Config.ToggleOff)
 
-        -- ★ เงาขาวเฉียง (เฉพาะ toggle)
-        local tgHi = Instance.new("Frame", pill)
-        tgHi.Name = "TopLeftHighlight"
-        tgHi.Size = UDim2.new(0.6, 0, 0.6, 0)
-        tgHi.Position = UDim2.new(0, 0, 0, 0)
-        tgHi.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        tgHi.BackgroundTransparency = 0.55
-        tgHi.BorderSizePixel = 0
-        tgHi.ZIndex = 1
+        toggleGlow(pill)
 
-        local tgGrad = Instance.new("UIGradient", tgHi)
-        tgGrad.Rotation = 135
-        tgGrad.Transparency = NumberSequence.new{
-            NumberSequenceKeypoint.new(0.0, 0.35),
-            NumberSequenceKeypoint.new(0.7, 1.0),
-            NumberSequenceKeypoint.new(1.0, 1.0),
-        }
-        Instance.new("UICorner", tgHi).CornerRadius = UDim.new(1, 0)
-
-        -- Knob
-        local k = Instance.new("Frame", pill)
-        k.Size = UDim2.new(0, sizeH - 6, 0, sizeH - 6)
-        k.Position = defaultOn and UDim2.new(1, -(sizeH-3), 0.5, -(sizeH-6)/2) or UDim2.new(0, 3, 0.5, -(sizeH-6)/2)
-        k.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        k.BorderSizePixel = 0
-        k.ZIndex = 5
-        Instance.new("UICorner", k).CornerRadius = UDim.new(1, 0)
+        local knob = Instance.new("Frame", pill)
+        knob.Size = UDim2.new(0, 18, 0, 18)
+        knob.Position = defaultOn
+            and UDim2.new(1, -21, 0.5, -9)
+            or UDim2.new(0, 3, 0.5, -9)
+        knob.BackgroundColor3 = Color3.new(1, 1, 1)
+        knob.BorderSizePixel = 0
+        knob.ZIndex = 6
+        corner(knob, 999)
 
         local on = defaultOn
         local function update()
-            grad.Color = on and ColorSequence.new{
-                ColorSequenceKeypoint.new(0.0, Theme.TogOnL),
-                ColorSequenceKeypoint.new(1.0, Theme.TogOnR),
-            } or ColorSequence.new{
-                ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
-                ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
-            }
-            TweenService:Create(k, TweenInfo.new(0.22), {
-                Position = on and UDim2.new(1, -(sizeH-3), 0.5, -(sizeH-6)/2)
-                            or UDim2.new(0, 3, 0.5, -(sizeH-6)/2)
+            pillGrad.Color = on and ColorSequence.new(Config.ToggleOn, Config.AccentDim)
+                or ColorSequence.new(Config.ToggleOff, Config.ToggleOff)
+            Tween:Create(knob, TweenInfo.new(0.22), {
+                Position = on and UDim2.new(1, -21, 0.5, -9)
+                    or UDim2.new(0, 3, 0.5, -9)
             }):Play()
         end
 
@@ -443,20 +404,14 @@ local function buildUI()
             if cb then cb(on) end
         end)
 
-        return { Set = function(v)
-            on = v
-            update()
-        end }
+        return { Set = function(v) on = v; update() end }
     end
 
-    --=================================================================
-    -- MINI MODE
-    --=================================================================
     local miniBtn = Instance.new("TextButton")
     miniBtn.Name = "MiniBtn"
     miniBtn.Size = UDim2.new(0, 48, 0, 48)
     miniBtn.Position = UDim2.new(0, 20, 0, 100)
-    miniBtn.BackgroundColor3 = Theme.Card2
+    miniBtn.BackgroundColor3 = Config.CardMid
     miniBtn.BorderSizePixel = 0
     miniBtn.Text = ""
     miniBtn.AutoButtonColor = false
@@ -464,236 +419,135 @@ local function buildUI()
     miniBtn.Active = true
     miniBtn.Draggable = true
     miniBtn.Parent = gui
-    Instance.new("UICorner", miniBtn).CornerRadius = UDim.new(0, 12)
+    corner(miniBtn, 12)
+    gradient(miniBtn, 90, {Config.CardTop, Config.CardBot})
 
-    local mbGrad = Instance.new("UIGradient", miniBtn)
-    mbGrad.Rotation = 90
-    mbGrad.Color = ColorSequence.new(Theme.Card1, Theme.Card3)
-
-    local mbIcon = Instance.new("TextLabel", miniBtn)
-    mbIcon.Text = "◆"
-    mbIcon.Font = Enum.Font.GothamBold
-    mbIcon.TextSize = 22
-    mbIcon.TextColor3 = Theme.AccentLt
-    mbIcon.BackgroundTransparency = 1
-    mbIcon.Size = UDim2.new(1, 0, 1, 0)
+    local mbIcon = label(miniBtn, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
+        Config.FontBold, 22, Config.AccentLight, Enum.TextXAlignment.Center)
     mbIcon.ZIndex = 3
 
-    --=================================================================
-    -- WINDOW (★ โปร่งใสขึ้น)
-    --=================================================================
     local win = Instance.new("Frame")
     win.Name = "Window"
     win.Size = UDim2.new(0, 580, 0, 400)
     win.Position = UDim2.new(0.5, -290, 0.5, -200)
-    win.BackgroundColor3 = Theme.Bg2
-    win.BackgroundTransparency = 0.35       -- ★ โปร่งใสขึ้น
+    win.BackgroundColor3 = Config.BgTop
+    win.BackgroundTransparency = 0.15
     win.BorderSizePixel = 0
     win.Active = true
     win.ClipsDescendants = true
     win.Parent = gui
-    Instance.new("UICorner", win).CornerRadius = UDim.new(0, 16)
+    corner(win, 16)
+    gradient(win, 90, {Config.BgTop, Config.BgBot})
 
-    local winGrad = Instance.new("UIGradient", win)
-    winGrad.Rotation = 90
-    winGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.00, Theme.Bg1),
-        ColorSequenceKeypoint.new(0.45, Theme.Bg2),
-        ColorSequenceKeypoint.new(1.00, Theme.Bg3),
-    }
-
-    --=================================================================
-    -- SIDEBAR
-    --=================================================================
     local sidebar = Instance.new("Frame")
     sidebar.Size = UDim2.new(0, 155, 1, 0)
-    sidebar.BackgroundColor3 = Theme.Sidebar1
-    sidebar.BackgroundTransparency = 0.25
+    sidebar.BackgroundColor3 = Config.SidebarTop
     sidebar.BorderSizePixel = 0
     sidebar.Parent = win
-    Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 16)
+    corner(sidebar, 16)
+    gradient(sidebar, 90, {Config.SidebarTop, Config.SidebarBot})
 
-    local sbGrad = Instance.new("UIGradient", sidebar)
-    sbGrad.Rotation = 90
-    sbGrad.Color = ColorSequence.new(Theme.Sidebar1, Theme.Sidebar2)
-
-    -- Logo
     local logoBox = Instance.new("Frame")
     logoBox.Size = UDim2.new(0, 44, 0, 44)
     logoBox.Position = UDim2.new(0, 18, 0, 18)
-    logoBox.BackgroundColor3 = Theme.Card2
+    logoBox.BackgroundColor3 = Config.CardMid
     logoBox.BorderSizePixel = 0
     logoBox.ZIndex = 3
     logoBox.Parent = sidebar
-    Instance.new("UICorner", logoBox).CornerRadius = UDim.new(0, 12)
+    corner(logoBox, 12)
+    gradient(logoBox, 135, {Config.CardTop, Config.CardBot})
 
-    local lgGrad = Instance.new("UIGradient", logoBox)
-    lgGrad.Rotation = 135
-    lgGrad.Color = ColorSequence.new(Theme.Card1, Theme.Card3)
+    label(logoBox, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
+        Config.FontBold, 22, Config.AccentLight, Enum.TextXAlignment.Center).ZIndex = 4
 
-    local logoIcon = Instance.new("TextLabel")
-    logoIcon.Text = "◆"
-    logoIcon.Font = Enum.Font.GothamBold
-    logoIcon.TextSize = 22
-    logoIcon.TextColor3 = Theme.AccentLt
-    logoIcon.BackgroundTransparency = 1
-    logoIcon.Size = UDim2.new(1, 0, 1, 0)
-    logoIcon.ZIndex = 4
-    logoIcon.Parent = logoBox
+    label(sidebar, "AxionHub", UDim2.new(1, -20, 0, 18), UDim2.new(0, 18, 0, 70),
+        Config.FontBold, 15, Config.Text)
 
-    local title = Instance.new("TextLabel")
-    title.Text = "AxionHub"
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 15
-    title.TextColor3 = Theme.Text
-    title.BackgroundTransparency = 1
-    title.Size = UDim2.new(1, -20, 0, 18)
-    title.Position = UDim2.new(0, 18, 0, 70)
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.ZIndex = 3
-    title.Parent = sidebar
+    label(sidebar, "AutoDice  " .. Config.Version,
+        UDim2.new(1, -20, 0, 14), UDim2.new(0, 18, 0, 88),
+        Config.Font, 10, Config.Muted)
 
-    local sub = Instance.new("TextLabel")
-    sub.Text = "AutoDice  v11"
-    sub.Font = Enum.Font.Gotham
-    sub.TextSize = 10
-    sub.TextColor3 = Theme.Muted
-    sub.BackgroundTransparency = 1
-    sub.Size = UDim2.new(1, -20, 0, 14)
-    sub.Position = UDim2.new(0, 18, 0, 88)
-    sub.TextXAlignment = Enum.TextXAlignment.Left
-    sub.ZIndex = 3
-    sub.Parent = sidebar
-
-    local divider = Instance.new("Frame")
-    divider.Size = UDim2.new(1, -32, 0, 1)
-    divider.Position = UDim2.new(0, 16, 0, 118)
-    divider.BackgroundColor3 = Color3.fromRGB(120, 60, 200)
-    divider.BackgroundTransparency = 0.65
-    divider.BorderSizePixel = 0
-    divider.ZIndex = 3
-    divider.Parent = sidebar
-
-    --=================================================================
-    -- SIDEBAR MENU
-    --=================================================================
     local pages = { "MAIN", "SETTINGS" }
     local pageIcons = { "🏠", "⚙" }
-    local pageDesc = {
-        ["MAIN"]     = "dice & collect",
-        ["SETTINGS"] = "animation / range",
-    }
-
+    local pageDesc = { MAIN = "dice & collect", SETTINGS = "animation / range" }
     local pageBtns = {}
-    local yBase = 132
+
     for i, p in ipairs(pages) do
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(1, -24, 0, 44)
-        btn.Position = UDim2.new(0, 12, 0, yBase + (i-1) * 50)
-        btn.BackgroundColor3 = Theme.Card2
+        btn.Position = UDim2.new(0, 12, 0, 132 + (i - 1) * 50)
+        btn.BackgroundColor3 = Config.CardMid
         btn.BackgroundTransparency = 0.7
         btn.BorderSizePixel = 0
         btn.Text = ""
         btn.AutoButtonColor = false
         btn.ZIndex = 3
         btn.Parent = sidebar
-        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
+        corner(btn, 10)
 
         local glow = Instance.new("Frame", btn)
         glow.Size = UDim2.new(1, 0, 1, 0)
-        glow.BackgroundColor3 = Theme.Accent
+        glow.BackgroundColor3 = Config.Accent
         glow.BackgroundTransparency = 0.85
         glow.BorderSizePixel = 0
         glow.Visible = false
         glow.ZIndex = 1
-        Instance.new("UICorner", glow).CornerRadius = UDim.new(0, 10)
+        corner(glow, 10)
 
         local badge = Instance.new("Frame", btn)
         badge.Size = UDim2.new(0, 28, 0, 28)
         badge.Position = UDim2.new(0, 8, 0.5, -14)
-        badge.BackgroundColor3 = Theme.Card1
+        badge.BackgroundColor3 = Config.CardTop
         badge.BorderSizePixel = 0
         badge.ZIndex = 4
-        Instance.new("UICorner", badge).CornerRadius = UDim.new(0, 8)
+        corner(badge, 8)
 
-        local icon = Instance.new("TextLabel", badge)
-        icon.Text = pageIcons[i]
-        icon.Font = Enum.Font.GothamBold
-        icon.TextSize = 14
-        icon.TextColor3 = Theme.AccentLt
-        icon.BackgroundTransparency = 1
-        icon.Size = UDim2.new(1, 0, 1, 0)
-        icon.ZIndex = 5
+        label(badge, pageIcons[i], UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
+            Config.FontBold, 14, Config.AccentLight, Enum.TextXAlignment.Center).ZIndex = 5
 
-        local nameLbl = Instance.new("TextLabel", btn)
-        nameLbl.Text = p:sub(1,1) .. p:sub(2):lower()
-        nameLbl.Font = Enum.Font.GothamBold
-        nameLbl.TextSize = 11.5
-        nameLbl.TextColor3 = Theme.TextDim
-        nameLbl.BackgroundTransparency = 1
-        nameLbl.Size = UDim2.new(1, -50, 0, 14)
-        nameLbl.Position = UDim2.new(0, 44, 0, 7)
-        nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+        local nameLbl = label(btn, p:sub(1, 1) .. p:sub(2):lower(),
+            UDim2.new(1, -50, 0, 14), UDim2.new(0, 44, 0, 7),
+            Config.FontBold, 11.5, Config.TextDim)
         nameLbl.ZIndex = 4
 
-        local descLbl = Instance.new("TextLabel", btn)
-        descLbl.Text = pageDesc[p]
-        descLbl.Font = Enum.Font.Gotham
-        descLbl.TextSize = 9
-        descLbl.TextColor3 = Theme.Muted
-        descLbl.BackgroundTransparency = 1
-        descLbl.Size = UDim2.new(1, -50, 0, 12)
-        descLbl.Position = UDim2.new(0, 44, 0, 23)
-        descLbl.TextXAlignment = Enum.TextXAlignment.Left
+        local descLbl = label(btn, pageDesc[p],
+            UDim2.new(1, -50, 0, 12), UDim2.new(0, 44, 0, 23),
+            Config.Font, 9, Config.Muted)
         descLbl.ZIndex = 4
 
-        pageBtns[p] = { btn=btn, glow=glow, name=nameLbl, icon=icon }
+        pageBtns[p] = { btn = btn, glow = glow, name = nameLbl, icon = badge:FindFirstChildOfClass("TextLabel") }
     end
 
-    --=================================================================
-    -- CONTENT
-    --=================================================================
     local content = Instance.new("Frame")
     content.Size = UDim2.new(1, -155, 1, 0)
     content.Position = UDim2.new(0, 155, 0, 0)
     content.BackgroundTransparency = 1
     content.Parent = win
 
-    --=================================================================
-    -- MAIN PAGE
-    --=================================================================
     local mainPage = Instance.new("Frame")
     mainPage.Size = UDim2.new(1, 0, 1, 0)
     mainPage.BackgroundTransparency = 1
     mainPage.Parent = content
 
-    -- Header
-    local header = makeCard(mainPage, UDim2.new(1, -36, 0, 46), UDim2.new(0, 18, 0, 16))
+    local header = card(mainPage, UDim2.new(1, -36, 0, 46), UDim2.new(0, 18, 0, 16))
 
     local dot = Instance.new("Frame", header)
     dot.Size = UDim2.new(0, 8, 0, 8)
     dot.Position = UDim2.new(0, 14, 0.5, -4)
-    dot.BackgroundColor3 = Theme.Muted
+    dot.BackgroundColor3 = Config.Muted
     dot.BorderSizePixel = 0
-    dot.ZIndex = 4
-    Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+    dot.ZIndex = 5
+    corner(dot, 999)
 
-    local statusTxt = Instance.new("TextLabel", header)
-    statusTxt.Font = Enum.Font.Gotham
-    statusTxt.TextSize = 11
-    statusTxt.TextColor3 = Theme.Text
-    statusTxt.BackgroundTransparency = 1
-    statusTxt.Size = UDim2.new(1, -90, 1, 0)
-    statusTxt.Position = UDim2.new(0, 30, 0, 0)
-    statusTxt.TextXAlignment = Enum.TextXAlignment.Left
-    statusTxt.Text = "READY"
-    statusTxt.ZIndex = 4
+    local statusTxt = label(header, "READY",
+        UDim2.new(1, -90, 1, 0), UDim2.new(0, 30, 0, 0),
+        Config.Font, 11, Config.Text)
 
     task.spawn(function()
         while statusTxt.Parent do
             local ready = remotesReady
             local stat = ready and (State.running and "RUNNING" or "IDLE") or "NO REMOTES"
-            local color = ready and (State.running and Theme.Good or Theme.Muted) or Theme.Bad
+            local color = ready and (State.running and Config.Good or Config.Muted) or Config.Bad
             statusTxt.Text = string.format("💤 · %s · rolls: %d · 💰 %d",
                 stat, State.rolls, State.collected)
             dot.BackgroundColor3 = color
@@ -701,180 +555,107 @@ local function buildUI()
         end
     end)
 
-    --=================================================================
-    -- ★★★ MODE + AUTO ROLL รวมเป็น card เดียว ★★★
-    --=================================================================
-    local modeCard = makeCard(mainPage, UDim2.new(1, -36, 0, 106), UDim2.new(0, 18, 0, 76))
+    local modeCard = card(mainPage, UDim2.new(1, -36, 0, 106), UDim2.new(0, 18, 0, 76))
 
-    local mcLbl = Instance.new("TextLabel", modeCard)
-    mcLbl.Text = "MODE"
-    mcLbl.Font = Enum.Font.GothamBold
-    mcLbl.TextSize = 9.5
-    mcLbl.TextColor3 = Theme.AccentLt
-    mcLbl.BackgroundTransparency = 1
-    mcLbl.Size = UDim2.new(1, -28, 0, 14)
-    mcLbl.Position = UDim2.new(0, 14, 0, 8)
-    mcLbl.TextXAlignment = Enum.TextXAlignment.Left
-    mcLbl.ZIndex = 4
+    label(modeCard, "MODE", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8),
+        Config.FontBold, 9.5, Config.AccentLight)
 
-    -- ปุ่มโหมด 3 ปุ่ม (AUTO / SPAM / BOTH)
-    local modes = {"AUTO", "SPAM", "BOTH"}
+    local modes = { "AUTO", "SPAM", "BOTH" }
     local modeBtns = {}
+
     for i, m in ipairs(modes) do
         local mb = Instance.new("TextButton")
-        mb.Size = UDim2.new(0, 82, 0, 30)
-        mb.Position = UDim2.new(0, 14 + (i-1) * 88, 0, 28)
+        mb.Size = UDim2.new(0, 82, 0, 32)
+        mb.Position = UDim2.new(0, 14 + (i - 1) * 88, 0, 28)
         mb.BackgroundColor3 = Color3.fromRGB(16, 4, 32)
-        mb.BackgroundTransparency = 0.4
+        mb.BackgroundTransparency = 0.35
         mb.BorderSizePixel = 0
         mb.Text = m
-        mb.Font = Enum.Font.GothamBold
+        mb.Font = Config.FontBold
         mb.TextSize = 11
-        mb.TextColor3 = Theme.TextDim
+        mb.TextColor3 = Config.TextDim
         mb.AutoButtonColor = false
         mb.ZIndex = 4
         mb.Parent = modeCard
-        Instance.new("UICorner", mb).CornerRadius = UDim.new(0, 8)
+        corner(mb, 8)
 
-        modeBtns[m] = { btn = mb }
+        modeBtns[m] = mb
 
         mb.MouseButton1Click:Connect(function()
             State.mode = m
-            for mm, data in pairs(modeBtns) do
+            for mm, btn in pairs(modeBtns) do
                 local on = (mm == State.mode)
-                data.btn.BackgroundColor3 = on and Theme.Accent or Color3.fromRGB(16, 4, 32)
-                data.btn.BackgroundTransparency = on and 0.2 or 0.4
-                data.btn.TextColor3 = on and Theme.Text or Theme.TextDim
+                btn.BackgroundColor3 = on and Config.Accent or Color3.fromRGB(16, 4, 32)
+                btn.BackgroundTransparency = on and 0.2 or 0.35
+                btn.TextColor3 = on and Config.Text or Config.TextDim
             end
         end)
     end
 
-    for mm, data in pairs(modeBtns) do
+    for mm, btn in pairs(modeBtns) do
         local on = (mm == State.mode)
-        data.btn.BackgroundColor3 = on and Theme.Accent or Color3.fromRGB(16, 4, 32)
-        data.btn.BackgroundTransparency = on and 0.2 or 0.4
-        data.btn.TextColor3 = on and Theme.Text or Theme.TextDim
+        btn.BackgroundColor3 = on and Config.Accent or Color3.fromRGB(16, 4, 32)
+        btn.BackgroundTransparency = on and 0.2 or 0.35
+        btn.TextColor3 = on and Config.Text or Config.TextDim
     end
 
-    -- Divider ใน card
-    local innerDiv = Instance.new("Frame", modeCard)
-    innerDiv.Size = UDim2.new(1, -28, 0, 1)
-    innerDiv.Position = UDim2.new(0, 14, 0, 66)
-    innerDiv.BackgroundColor3 = Color3.fromRGB(120, 60, 200)
-    innerDiv.BackgroundTransparency = 0.7
-    innerDiv.BorderSizePixel = 0
-    innerDiv.ZIndex = 4
+    local autoRollRow = Instance.new("Frame", modeCard)
+    autoRollRow.Size = UDim2.new(1, -28, 0, 40)
+    autoRollRow.Position = UDim2.new(0, 14, 0, 66)
+    autoRollRow.BackgroundTransparency = 1
+    autoRollRow.ZIndex = 4
 
-    -- 🎲 Auto Roll toggle ใน card เดียวกัน
-    local arLbl = Instance.new("TextLabel", modeCard)
-    arLbl.Text = "🎲 Auto Roll"
-    arLbl.Font = Enum.Font.GothamBold
-    arLbl.TextSize = 12
-    arLbl.TextColor3 = Theme.Text
-    arLbl.BackgroundTransparency = 1
-    arLbl.Size = UDim2.new(0.6, 0, 0, 20)
-    arLbl.Position = UDim2.new(0, 14, 0, 76)
-    arLbl.TextXAlignment = Enum.TextXAlignment.Left
-    arLbl.ZIndex = 4
+    label(autoRollRow, "🎲 Auto Roll",
+        UDim2.new(0.7, 0, 1, 0), UDim2.new(0, 0, 0, 0),
+        Config.FontBold, 12, Config.Text)
 
-    local arInfo = Instance.new("TextLabel", modeCard)
-    arInfo.Text = "click to start rolling"
-    arInfo.Font = Enum.Font.Gotham
-    arInfo.TextSize = 9
-    arInfo.TextColor3 = Theme.AccentLt
-    arInfo.BackgroundTransparency = 1
-    arInfo.Size = UDim2.new(1, -100, 0, 12)
-    arInfo.Position = UDim2.new(0, 14, 0, 92)
-    arInfo.TextXAlignment = Enum.TextXAlignment.Left
-    arInfo.ZIndex = 4
+    local arInfo = label(autoRollRow, "click to start",
+        UDim2.new(0.7, 0, 1, 0), UDim2.new(0, 0, 0, 0),
+        Config.Font, 9, Config.AccentLight)
+    arInfo.Position = UDim2.new(0, 100, 0, 0)
 
-    -- Toggle Auto Roll (ม่วงไล่เฉด + เงา)
-    local arPill = Instance.new("TextButton", modeCard)
-    arPill.Size = UDim2.new(0, 62, 0, 28)
-    arPill.Position = UDim2.new(1, -76, 0, 78)
+    local arPill = Instance.new("TextButton", autoRollRow)
+    arPill.Size = UDim2.new(0, 62, 0, 30)
+    arPill.Position = UDim2.new(1, -62, 0.5, -15)
     arPill.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
     arPill.Text = ""
     arPill.AutoButtonColor = false
-    arPill.ZIndex = 4
-    Instance.new("UICorner", arPill).CornerRadius = UDim.new(1, 0)
+    arPill.ZIndex = 5
+    corner(arPill, 999)
 
-    local arGrad = Instance.new("UIGradient", arPill)
-    arGrad.Rotation = 0
-    arGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
-        ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
-    }
-
-    -- เงาขาว
-    local arHi = Instance.new("Frame", arPill)
-    arHi.Size = UDim2.new(0.6, 0, 0.6, 0)
-    arHi.Position = UDim2.new(0, 0, 0, 0)
-    arHi.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    arHi.BackgroundTransparency = 0.55
-    arHi.BorderSizePixel = 0
-    arHi.ZIndex = 1
-
-    local arHiGrad = Instance.new("UIGradient", arHi)
-    arHiGrad.Rotation = 135
-    arHiGrad.Transparency = NumberSequence.new{
-        NumberSequenceKeypoint.new(0.0, 0.35),
-        NumberSequenceKeypoint.new(0.7, 1.0),
-        NumberSequenceKeypoint.new(1.0, 1.0),
-    }
-    Instance.new("UICorner", arHi).CornerRadius = UDim.new(1, 0)
+    local arGrad = gradient(arPill, 0, {Config.ToggleOff, Config.ToggleOff})
+    toggleGlow(arPill)
 
     local arK = Instance.new("Frame", arPill)
-    arK.Size = UDim2.new(0, 22, 0, 22)
-    arK.Position = UDim2.new(0, 3, 0.5, -11)
-    arK.BackgroundColor3 = Color3.new(1,1,1)
+    arK.Size = UDim2.new(0, 24, 0, 24)
+    arK.Position = UDim2.new(0, 3, 0.5, -12)
+    arK.BackgroundColor3 = Color3.new(1, 1, 1)
     arK.BorderSizePixel = 0
-    arK.ZIndex = 5
-    Instance.new("UICorner", arK).CornerRadius = UDim.new(1, 0)
+    arK.ZIndex = 6
+    corner(arK, 999)
 
     arPill.MouseButton1Click:Connect(function()
-        if State.running then stop() else start() end
+        if State.running then stopDice() else startDice() end
         local on = State.running
-
-        arGrad.Color = on and ColorSequence.new{
-            ColorSequenceKeypoint.new(0.0, Theme.TogOnL),
-            ColorSequenceKeypoint.new(1.0, Theme.TogOnR),
-        } or ColorSequence.new{
-            ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
-            ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
-        }
-        TweenService:Create(arK, TweenInfo.new(0.25), {
-            Position = on and UDim2.new(1, -25, 0.5, -11) or UDim2.new(0, 3, 0.5, -11),
+        arGrad.Color = on and ColorSequence.new(Config.ToggleOn, Config.AccentDim)
+            or ColorSequence.new(Config.ToggleOff, Config.ToggleOff)
+        Tween:Create(arK, TweenInfo.new(0.25), {
+            Position = on and UDim2.new(1, -27, 0.5, -12)
+                or UDim2.new(0, 3, 0.5, -12),
         }):Play()
-        arInfo.Text = on and "rolling..." or "click to start rolling"
-        arInfo.TextColor3 = on and Theme.Good or Theme.AccentLt
+        arInfo.Text = on and "rolling..." or "click to start"
+        arInfo.TextColor3 = on and Config.Good or Config.AccentLight
     end)
 
-    --=================================================================
-    -- SPEED CARD
-    --=================================================================
-    local speedCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 192))
+    local speedCard = card(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 192))
 
-    local spdLbl = Instance.new("TextLabel", speedCard)
-    spdLbl.Text = "SPAM SPEED"
-    spdLbl.Font = Enum.Font.GothamBold
-    spdLbl.TextSize = 9.5
-    spdLbl.TextColor3 = Theme.AccentLt
-    spdLbl.BackgroundTransparency = 1
-    spdLbl.Size = UDim2.new(0.5, 0, 0, 14)
-    spdLbl.Position = UDim2.new(0, 12, 0, 8)
-    spdLbl.TextXAlignment = Enum.TextXAlignment.Left
-    spdLbl.ZIndex = 4
+    label(speedCard, "SPAM SPEED",
+        UDim2.new(0.5, 0, 0, 14), UDim2.new(0, 12, 0, 8),
+        Config.FontBold, 9.5, Config.AccentLight)
 
-    local spdVal = Instance.new("TextLabel", speedCard)
-    spdVal.Text = "33 / sec"
-    spdVal.Font = Enum.Font.GothamBold
-    spdVal.TextSize = 11
-    spdVal.TextColor3 = Theme.Text
-    spdVal.BackgroundTransparency = 1
-    spdVal.Size = UDim2.new(0.5, -12, 0, 14)
-    spdVal.Position = UDim2.new(0.5, 0, 0, 8)
-    spdVal.TextXAlignment = Enum.TextXAlignment.Right
-    spdVal.ZIndex = 4
+    local spdVal = label(speedCard, "33 / sec",
+        UDim2.new(0.5, -12, 0, 14), UDim2.new(0.5, 0, 0, 8),
+        Config.FontBold, 11, Config.Text, Enum.TextXAlignment.Right)
 
     local track = Instance.new("TextButton", speedCard)
     track.Size = UDim2.new(1, -24, 0, 10)
@@ -884,24 +665,23 @@ local function buildUI()
     track.Text = ""
     track.AutoButtonColor = false
     track.ZIndex = 4
-    Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+    corner(track, 999)
 
     local fill = Instance.new("Frame", track)
     fill.Size = UDim2.new(0.5, 0, 1, 0)
-    fill.BackgroundColor3 = Theme.Accent
+    fill.BackgroundColor3 = Config.Accent
     fill.BorderSizePixel = 0
     fill.ZIndex = 5
-    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
-    local fillG = Instance.new("UIGradient", fill)
-    fillG.Color = ColorSequence.new(Theme.Accent2, Theme.AccentLt)
+    corner(fill, 999)
+    gradient(fill, 0, {Config.AccentDim, Config.AccentLight})
 
     local knob = Instance.new("Frame", track)
     knob.Size = UDim2.new(0, 14, 0, 14)
     knob.Position = UDim2.new(0.5, -7, 0.5, -7)
-    knob.BackgroundColor3 = Color3.new(1,1,1)
+    knob.BackgroundColor3 = Color3.new(1, 1, 1)
     knob.BorderSizePixel = 0
     knob.ZIndex = 6
-    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    corner(knob, 999)
 
     local draggingSlider = false
     local function setFromX(x)
@@ -915,72 +695,51 @@ local function buildUI()
 
     track.InputBegan:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
-        or inp.UserInputType == Enum.UserInputType.Touch then
+            or inp.UserInputType == Enum.UserInputType.Touch then
             draggingSlider = true
             setFromX(inp.Position.X)
         end
     end)
     track.InputChanged:Connect(function(inp)
         if draggingSlider and (inp.UserInputType == Enum.UserInputType.MouseMovement
-        or inp.UserInputType == Enum.UserInputType.Touch) then
+            or inp.UserInputType == Enum.UserInputType.Touch) then
             setFromX(inp.Position.X)
         end
     end)
-    UserInputService.InputEnded:Connect(function(inp)
+    UIS.InputEnded:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
-        or inp.UserInputType == Enum.UserInputType.Touch then
+            or inp.UserInputType == Enum.UserInputType.Touch then
             draggingSlider = false
         end
     end)
 
-    --=================================================================
-    -- COLLECT CARD
-    --=================================================================
-    local collectCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 262))
+    local collectCard = card(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 262))
 
-    makeToggle(collectCard, 8, "💰 AFK Collect Money",
+    makeToggle(collectCard, 11, "💰 AFK Collect Money",
         State.autoCollect,
         function(v)
             if v then startCollect() else stopCollect() end
-        end, 46, 24, UDim2.new(1, -60, 0, 8))
+        end)
 
-    local acInfo = Instance.new("TextLabel", collectCard)
-    acInfo.Text = string.format("every %.1fs · plot %d→%d",
-        State.collectRate, State.plotMin, State.plotMax)
-    acInfo.Font = Enum.Font.Gotham
-    acInfo.TextSize = 9
-    acInfo.TextColor3 = Theme.AccentLt
-    acInfo.BackgroundTransparency = 1
-    acInfo.Size = UDim2.new(1, -28, 0, 14)
-    acInfo.Position = UDim2.new(0, 14, 0, 38)
-    acInfo.TextXAlignment = Enum.TextXAlignment.Left
-    acInfo.ZIndex = 4
+    label(collectCard, string.format("every %.1fs · plot %d→%d",
+        State.collectRate, State.plotMin, State.plotMax),
+        UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 42),
+        Config.Font, 9, Config.AccentLight)
 
-    --=================================================================
-    -- SETTINGS PAGE
-    --=================================================================
     local settingsPage = Instance.new("Frame")
     settingsPage.Size = UDim2.new(1, 0, 1, 0)
     settingsPage.BackgroundTransparency = 1
     settingsPage.Visible = false
     settingsPage.Parent = content
 
-    local sHeader = makeCard(settingsPage, UDim2.new(1, -36, 0, 46), UDim2.new(0, 18, 0, 16))
+    local sHeader = card(settingsPage, UDim2.new(1, -36, 0, 46), UDim2.new(0, 18, 0, 16))
+    label(sHeader, "⚙  Settings",
+        UDim2.new(1, -30, 1, 0), UDim2.new(0, 16, 0, 0),
+        Config.FontBold, 12, Config.Text)
 
-    local sTitle = Instance.new("TextLabel", sHeader)
-    sTitle.Text = "⚙  Settings"
-    sTitle.Font = Enum.Font.GothamBold
-    sTitle.TextSize = 12
-    sTitle.TextColor3 = Theme.Text
-    sTitle.BackgroundTransparency = 1
-    sTitle.Size = UDim2.new(1, -30, 1, 0)
-    sTitle.Position = UDim2.new(0, 16, 0, 0)
-    sTitle.TextXAlignment = Enum.TextXAlignment.Left
-    sTitle.ZIndex = 4
+    local setCard = card(settingsPage, UDim2.new(1, -36, 0, 92), UDim2.new(0, 18, 0, 76))
 
-    local setCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 90), UDim2.new(0, 18, 0, 76))
-
-    makeToggle(setCard, 12, "Bypass Roll Animation",
+    makeToggle(setCard, 4, "Bypass Roll Animation",
         State.bypassAnim,
         function(v) State.bypassAnim = v end)
 
@@ -988,66 +747,46 @@ local function buildUI()
         State.killCutscene,
         function(v) State.killCutscene = v end)
 
-    local rangeCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 76), UDim2.new(0, 18, 0, 178))
+    local rangeCard = card(settingsPage, UDim2.new(1, -36, 0, 76), UDim2.new(0, 18, 0, 180))
 
-    local rcLbl = Instance.new("TextLabel", rangeCard)
-    rcLbl.Text = "PLOT RANGE"
-    rcLbl.Font = Enum.Font.GothamBold
-    rcLbl.TextSize = 9.5
-    rcLbl.TextColor3 = Theme.AccentLt
-    rcLbl.BackgroundTransparency = 1
-    rcLbl.Size = UDim2.new(1, -28, 0, 14)
-    rcLbl.Position = UDim2.new(0, 14, 0, 8)
-    rcLbl.TextXAlignment = Enum.TextXAlignment.Left
-    rcLbl.ZIndex = 4
+    label(rangeCard, "PLOT RANGE",
+        UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8),
+        Config.FontBold, 9.5, Config.AccentLight)
 
-    local rcVal = Instance.new("TextLabel", rangeCard)
-    rcVal.Text = string.format("1 → %d", State.plotMax)
-    rcVal.Font = Enum.Font.Gotham
-    rcVal.TextSize = 10
-    rcVal.TextColor3 = Theme.Text
-    rcVal.BackgroundTransparency = 1
-    rcVal.Size = UDim2.new(1, -28, 0, 14)
-    rcVal.Position = UDim2.new(0, 14, 0, 26)
-    rcVal.TextXAlignment = Enum.TextXAlignment.Left
-    rcVal.ZIndex = 4
+    local rcVal = label(rangeCard, string.format("1 → %d", State.plotMax),
+        UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 26),
+        Config.Font, 10, Config.Text)
 
     local function rangeBtn(txt, xPos, val)
         local b = Instance.new("TextButton", rangeCard)
         b.Size = UDim2.new(0, 52, 0, 26)
         b.Position = UDim2.new(0, xPos, 0, 44)
-        b.BackgroundColor3 = Theme.Card1
+        b.BackgroundColor3 = Config.CardTop
         b.BackgroundTransparency = 0.15
         b.Text = txt
-        b.Font = Enum.Font.GothamBold
+        b.Font = Config.FontBold
         b.TextSize = 10
-        b.TextColor3 = Theme.Text
+        b.TextColor3 = Config.Text
         b.AutoButtonColor = false
         b.ZIndex = 4
-        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+        b.Parent = rangeCard
+        corner(b, 8)
 
         b.MouseButton1Click:Connect(function()
             State.plotMin, State.plotMax = 1, val
             rcVal.Text = string.format("1 → %d", State.plotMax)
-            acInfo.Text = string.format("every %.1fs · plot %d→%d",
-                State.collectRate, State.plotMin, State.plotMax)
         end)
-        return b
     end
 
     rangeBtn("1 → 4", 14, 4)
     rangeBtn("1 → 8", 72, 8)
     rangeBtn("1 → 16", 130, 16)
 
-    --=================================================================
-    -- PAGE SWITCHER
-    --=================================================================
     local function applyPage()
         for p, data in pairs(pageBtns) do
             local on = (p == State.page)
             data.glow.Visible = on
-            data.name.TextColor3 = on and Theme.Text or Theme.TextDim
-            data.icon.TextColor3 = on and Theme.Text or Theme.AccentLt
+            data.name.TextColor3 = on and Config.Text or Config.TextDim
             data.btn.BackgroundTransparency = on and 0.15 or 0.7
         end
         mainPage.Visible = (State.page == "MAIN")
@@ -1061,30 +800,27 @@ local function buildUI()
         end)
     end
 
-    --=================================================================
-    -- ปุ่มมุมขวาบน
-    --=================================================================
-    local topBtnsFrame = Instance.new("Frame")
-    topBtnsFrame.Size = UDim2.new(0, 60, 0, 22)
-    topBtnsFrame.Position = UDim2.new(1, -70, 0, 10)
-    topBtnsFrame.BackgroundTransparency = 1
-    topBtnsFrame.ZIndex = 10
-    topBtnsFrame.Parent = win
+    local topBtns = Instance.new("Frame")
+    topBtns.Size = UDim2.new(0, 60, 0, 22)
+    topBtns.Position = UDim2.new(1, -70, 0, 10)
+    topBtns.BackgroundTransparency = 1
+    topBtns.ZIndex = 10
+    topBtns.Parent = win
 
     local minBtn = Instance.new("TextButton")
     minBtn.Size = UDim2.new(0, 22, 0, 22)
     minBtn.Position = UDim2.new(0, 0, 0, 0)
-    minBtn.BackgroundColor3 = Theme.Card1
+    minBtn.BackgroundColor3 = Config.CardTop
     minBtn.BackgroundTransparency = 0.3
     minBtn.BorderSizePixel = 0
     minBtn.Text = "—"
-    minBtn.Font = Enum.Font.GothamBold
+    minBtn.Font = Config.FontBold
     minBtn.TextSize = 14
-    minBtn.TextColor3 = Theme.Text
+    minBtn.TextColor3 = Config.Text
     minBtn.AutoButtonColor = false
     minBtn.ZIndex = 11
-    minBtn.Parent = topBtnsFrame
-    Instance.new("UICorner", minBtn).CornerRadius = UDim.new(1, 0)
+    minBtn.Parent = topBtns
+    corner(minBtn, 999)
 
     local closeBtn = Instance.new("TextButton")
     closeBtn.Size = UDim2.new(0, 22, 0, 22)
@@ -1093,26 +829,13 @@ local function buildUI()
     closeBtn.BackgroundTransparency = 0.15
     closeBtn.BorderSizePixel = 0
     closeBtn.Text = "✕"
-    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.Font = Config.FontBold
     closeBtn.TextSize = 12
-    closeBtn.TextColor3 = Theme.Text
+    closeBtn.TextColor3 = Config.Text
     closeBtn.AutoButtonColor = false
     closeBtn.ZIndex = 11
-    closeBtn.Parent = topBtnsFrame
-    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(1, 0)
-
-    minBtn.MouseEnter:Connect(function()
-        TweenService:Create(minBtn, TweenInfo.new(0.15), {BackgroundTransparency=0.1}):Play()
-    end)
-    minBtn.MouseLeave:Connect(function()
-        TweenService:Create(minBtn, TweenInfo.new(0.15), {BackgroundTransparency=0.3}):Play()
-    end)
-    closeBtn.MouseEnter:Connect(function()
-        TweenService:Create(closeBtn, TweenInfo.new(0.15), {BackgroundTransparency=0.0}):Play()
-    end)
-    closeBtn.MouseLeave:Connect(function()
-        TweenService:Create(closeBtn, TweenInfo.new(0.15), {BackgroundTransparency=0.15}):Play()
-    end)
+    closeBtn.Parent = topBtns
+    corner(closeBtn, 999)
 
     minBtn.MouseButton1Click:Connect(function()
         State.minimized = true
@@ -1122,34 +845,32 @@ local function buildUI()
     end)
 
     closeBtn.MouseButton1Click:Connect(function()
-        pcall(stop)
+        pcall(stopDice)
         pcall(stopCollect)
         pcall(function() blur:Destroy() end)
         pcall(function() gui:Destroy() end)
-        print("[AxionHub] Script closed by user.")
     end)
 
     miniBtn.MouseButton1Click:Connect(function()
         State.minimized = false
         win.Visible = true
         miniBtn.Visible = false
-        if blur then blur.Size = 10 end
+        if blur then blur.Size = 12 end
     end)
 
-    -- Drag
     local draggingWin = false
     local dragStart, startPos
     header.InputBegan:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
-        or inp.UserInputType == Enum.UserInputType.Touch then
+            or inp.UserInputType == Enum.UserInputType.Touch then
             draggingWin = true
             dragStart = inp.Position
             startPos = win.Position
         end
     end)
-    UserInputService.InputChanged:Connect(function(inp)
+    UIS.InputChanged:Connect(function(inp)
         if draggingWin and (inp.UserInputType == Enum.UserInputType.MouseMovement
-        or inp.UserInputType == Enum.UserInputType.Touch) then
+            or inp.UserInputType == Enum.UserInputType.Touch) then
             local d = inp.Position - dragStart
             win.Position = UDim2.new(
                 startPos.X.Scale, startPos.X.Offset + d.X,
@@ -1157,23 +878,19 @@ local function buildUI()
             )
         end
     end)
-    UserInputService.InputEnded:Connect(function(inp)
+    UIS.InputEnded:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
-        or inp.UserInputType == Enum.UserInputType.Touch then
+            or inp.UserInputType == Enum.UserInputType.Touch then
             draggingWin = false
         end
     end)
 
     applyPage()
-    print("[AxionHub] buildUI() finished.")
 end
 
---=====================================================================
--- 🚀 BUILD
---=====================================================================
 local ok, err = pcall(buildUI)
 if not ok then
     warn("[AxionHub] buildUI ERROR:", err)
 end
 
-print("[AxionHub] v11 ready.")
+print("[AxionHub] " .. Config.Version .. " ready.")
