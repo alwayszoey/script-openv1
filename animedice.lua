@@ -1,10 +1,10 @@
 --[[
-    AxionHub AutoDice v10
-    Changelog v9 → v10:
-      ✔ ลบ UIStroke (กรอบ) ทั้งหมด
-      ✔ Toggle ม่วงไล่เฉด + เงาขาวเฉียง
-      ✔ Card ใช้ gradient ม่วง + เงา
-      ✔ ดีไซน์โปร่ง ไม่มีกรอบ
+    AxionHub AutoDice v11
+    Changelog v10 → v11:
+      ✔ ลบเงาขาวออกจาก Card (เหลือแค่ที่ toggle)
+      ✔ Content bg โปร่งใสขึ้น + blur นุ่ม
+      ✔ รวม MODE + Auto Roll เป็นการ์ดเดียว
+      ✔ Card gradient ม่วงดำล้วน ไม่มี highlight ทับ
 --]]
 
 local Players           = game:GetService("Players")
@@ -18,29 +18,26 @@ local Workspace         = game:GetService("Workspace")
 local LP = Players.LocalPlayer
 local RS = ReplicatedStorage
 
-print("[AxionHub] ===== v10 starting =====")
+print("[AxionHub] ===== v11 starting =====")
 
 --=====================================================================
 -- THEME
 --=====================================================================
 local Theme = {
-    Bg1      = Color3.fromRGB(12,  3,  22),
-    Bg2      = Color3.fromRGB(6,   1,  12),
+    Bg1      = Color3.fromRGB(14,  4,  26),
+    Bg2      = Color3.fromRGB(7,   2,  14),
     Bg3      = Color3.fromRGB(0,   0,  0),
 
-    -- Card gradient ม่วง (ไม่มีกรอบ)
-    Card1    = Color3.fromRGB(66,  26, 112),
-    Card2    = Color3.fromRGB(40,  14, 76),
-    Card3    = Color3.fromRGB(20,  6,  40),
+    Card1    = Color3.fromRGB(72,  28, 118),
+    Card2    = Color3.fromRGB(42,  14, 80),
+    Card3    = Color3.fromRGB(18,  4,  36),
 
-    -- Sidebar สว่างกว่า content
     Sidebar1 = Color3.fromRGB(62,  24, 108),
     Sidebar2 = Color3.fromRGB(34,  12, 62),
 
-    -- Toggle gradient
-    TogOffL  = Color3.fromRGB(12,  4,  22),
-    TogOffR  = Color3.fromRGB(46,  18, 78),
-    TogOnL   = Color3.fromRGB(24,  6,  44),
+    TogOffL  = Color3.fromRGB(14,  4,  24),
+    TogOffR  = Color3.fromRGB(50,  20, 84),
+    TogOnL   = Color3.fromRGB(28,  6,  50),
     TogOnR   = Color3.fromRGB(168, 85, 247),
 
     Accent   = Color3.fromRGB(168, 85, 247),
@@ -54,9 +51,6 @@ local Theme = {
     Good     = Color3.fromRGB(130, 255, 180),
     Bad      = Color3.fromRGB(255, 100, 130),
     Gold     = Color3.fromRGB(255, 200, 80),
-
-    -- Shadow
-    Shadow   = Color3.fromRGB(255, 255, 255),
 }
 
 --=====================================================================
@@ -308,7 +302,7 @@ LP.CharacterAdded:Connect(function()
 end)
 
 --=====================================================================
--- 🎨 UI BUILDER — NO STROKE
+-- 🎨 UI BUILDER
 --=====================================================================
 local function buildUI()
     print("[AxionHub] buildUI() called")
@@ -325,54 +319,24 @@ local function buildUI()
     gui.DisplayOrder = 999
     gui.Parent = parent
 
+    -- ★ Blur นุ่มกว่าเดิม (เบลอนิดๆ)
     local blur = Instance.new("BlurEffect")
     blur.Name = "AxionHubBlur_Internal"
-    blur.Size = 18
+    blur.Size = 10
     blur.Parent = Lighting
     gui.Destroying:Connect(function()
         pcall(function() blur:Destroy() end)
     end)
 
     --=================================================================
-    -- ★ HELPER: ใส่เงาขาวเฉียงจากซ้ายบน (Soft highlight)
-    --=================================================================
-    local function addTopLeftHighlight(parent, strength)
-        strength = strength or 0.55
-        local hl = Instance.new("Frame", parent)
-        hl.Name = "TopLeftHighlight"
-        hl.Size = UDim2.new(0.6, 0, 0.55, 0)
-        hl.Position = UDim2.new(0, 0, 0, 0)
-        hl.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        hl.BackgroundTransparency = strength
-        hl.BorderSizePixel = 0
-        hl.ZIndex = 2
-
-        local grad = Instance.new("UIGradient", hl)
-        grad.Rotation = 135
-        grad.Transparency = NumberSequence.new{
-            NumberSequenceKeypoint.new(0.0, 0.35),
-            NumberSequenceKeypoint.new(0.55, 1.0),
-            NumberSequenceKeypoint.new(1.0, 1.0),
-        }
-        grad.Color = ColorSequence.new{
-            ColorSequenceKeypoint.new(0.0, Color3.fromRGB(255, 240, 255)),
-            ColorSequenceKeypoint.new(1.0, Color3.fromRGB(255, 255, 255)),
-        }
-
-        local corner = Instance.new("UICorner", hl)
-        corner.CornerRadius = UDim.new(0, 8)
-        return hl
-    end
-
-    --=================================================================
-    -- ★ HELPER: card (ม่วงไล่เฉด ไม่มีกรอบ)
+    -- ★ HELPER: card ม่วงดำล้วน (ไม่มีเงาขาวทับ)
     --=================================================================
     local function makeCard(parent, size, pos)
         local card = Instance.new("Frame")
         card.Size = size
         card.Position = pos
-        card.BackgroundColor3 = Theme.Card2
-        card.BackgroundTransparency = 0
+        card.BackgroundColor3 = Color3.fromRGB(20, 6, 38)
+        card.BackgroundTransparency = 0.25      -- ★ โปร่งใสขึ้น
         card.BorderSizePixel = 0
         card.Parent = parent
         Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
@@ -384,13 +348,15 @@ local function buildUI()
             ColorSequenceKeypoint.new(0.55, Theme.Card2),
             ColorSequenceKeypoint.new(1.00, Theme.Card3),
         }
-
-        addTopLeftHighlight(card, 0.6)
+        grad.Transparency = NumberSequence.new{
+            NumberSequenceKeypoint.new(0.0, 0.15),
+            NumberSequenceKeypoint.new(1.0, 0.55),
+        }
         return card
     end
 
     --=================================================================
-    -- ★ HELPER: Toggle ม่วงไล่เฉด + เงาขาว
+    -- ★ HELPER: Toggle (ม่วงไล่เฉด + เงาขาว) — มีแค่ตรงนี้
     --=================================================================
     local function makeToggle(parent, y, label, defaultOn, cb, sizeW, sizeH, posX)
         sizeW = sizeW or 46
@@ -406,7 +372,7 @@ local function buildUI()
         lbl.Size = UDim2.new(0.75, 0, 0, 20)
         lbl.Position = UDim2.new(0, 14, 0, y)
         lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.ZIndex = 3
+        lbl.ZIndex = 4
 
         local pill = Instance.new("TextButton", parent)
         pill.Size = UDim2.new(0, sizeW, 0, sizeH)
@@ -414,10 +380,10 @@ local function buildUI()
         pill.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
         pill.Text = ""
         pill.AutoButtonColor = false
-        pill.ZIndex = 3
+        pill.ZIndex = 4
         Instance.new("UICorner", pill).CornerRadius = UDim.new(1, 0)
 
-        -- ★ Gradient ม่วง ไล่เฉด
+        -- Gradient ม่วงไล่เฉด
         local grad = Instance.new("UIGradient", pill)
         grad.Rotation = 0
         grad.Color = defaultOn and ColorSequence.new{
@@ -428,10 +394,10 @@ local function buildUI()
             ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
         }
 
-        -- ★ เงาขาวเฉียงจากซ้ายบน (บนตัว toggle)
+        -- ★ เงาขาวเฉียง (เฉพาะ toggle)
         local tgHi = Instance.new("Frame", pill)
         tgHi.Name = "TopLeftHighlight"
-        tgHi.Size = UDim2.new(0.55, 0, 0.55, 0)
+        tgHi.Size = UDim2.new(0.6, 0, 0.6, 0)
         tgHi.Position = UDim2.new(0, 0, 0, 0)
         tgHi.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         tgHi.BackgroundTransparency = 0.55
@@ -441,13 +407,11 @@ local function buildUI()
         local tgGrad = Instance.new("UIGradient", tgHi)
         tgGrad.Rotation = 135
         tgGrad.Transparency = NumberSequence.new{
-            NumberSequenceKeypoint.new(0.0, 0.4),
+            NumberSequenceKeypoint.new(0.0, 0.35),
             NumberSequenceKeypoint.new(0.7, 1.0),
             NumberSequenceKeypoint.new(1.0, 1.0),
         }
-
-        local tgCorner = Instance.new("UICorner", tgHi)
-        tgCorner.CornerRadius = UDim.new(1, 0)
+        Instance.new("UICorner", tgHi).CornerRadius = UDim.new(1, 0)
 
         -- Knob
         local k = Instance.new("Frame", pill)
@@ -455,7 +419,7 @@ local function buildUI()
         k.Position = defaultOn and UDim2.new(1, -(sizeH-3), 0.5, -(sizeH-6)/2) or UDim2.new(0, 3, 0.5, -(sizeH-6)/2)
         k.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         k.BorderSizePixel = 0
-        k.ZIndex = 4
+        k.ZIndex = 5
         Instance.new("UICorner", k).CornerRadius = UDim.new(1, 0)
 
         local on = defaultOn
@@ -467,9 +431,6 @@ local function buildUI()
                 ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
                 ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
             }
-            TweenService:Create(pill, TweenInfo.new(0.22), {
-                BackgroundColor3 = on and Theme.Accent or Color3.fromRGB(10, 3, 20),
-            }):Play()
             TweenService:Create(k, TweenInfo.new(0.22), {
                 Position = on and UDim2.new(1, -(sizeH-3), 0.5, -(sizeH-6)/2)
                             or UDim2.new(0, 3, 0.5, -(sizeH-6)/2)
@@ -509,8 +470,6 @@ local function buildUI()
     mbGrad.Rotation = 90
     mbGrad.Color = ColorSequence.new(Theme.Card1, Theme.Card3)
 
-    addTopLeftHighlight(miniBtn, 0.5)
-
     local mbIcon = Instance.new("TextLabel", miniBtn)
     mbIcon.Text = "◆"
     mbIcon.Font = Enum.Font.GothamBold
@@ -521,13 +480,14 @@ local function buildUI()
     mbIcon.ZIndex = 3
 
     --=================================================================
-    -- WINDOW
+    -- WINDOW (★ โปร่งใสขึ้น)
     --=================================================================
     local win = Instance.new("Frame")
     win.Name = "Window"
     win.Size = UDim2.new(0, 580, 0, 400)
     win.Position = UDim2.new(0.5, -290, 0.5, -200)
     win.BackgroundColor3 = Theme.Bg2
+    win.BackgroundTransparency = 0.35       -- ★ โปร่งใสขึ้น
     win.BorderSizePixel = 0
     win.Active = true
     win.ClipsDescendants = true
@@ -543,11 +503,12 @@ local function buildUI()
     }
 
     --=================================================================
-    -- SIDEBAR (สว่างกว่า content, ไม่มีกรอบ)
+    -- SIDEBAR
     --=================================================================
     local sidebar = Instance.new("Frame")
     sidebar.Size = UDim2.new(0, 155, 1, 0)
     sidebar.BackgroundColor3 = Theme.Sidebar1
+    sidebar.BackgroundTransparency = 0.25
     sidebar.BorderSizePixel = 0
     sidebar.Parent = win
     Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 16)
@@ -555,8 +516,6 @@ local function buildUI()
     local sbGrad = Instance.new("UIGradient", sidebar)
     sbGrad.Rotation = 90
     sbGrad.Color = ColorSequence.new(Theme.Sidebar1, Theme.Sidebar2)
-
-    addTopLeftHighlight(sidebar, 0.75)
 
     -- Logo
     local logoBox = Instance.new("Frame")
@@ -595,7 +554,7 @@ local function buildUI()
     title.Parent = sidebar
 
     local sub = Instance.new("TextLabel")
-    sub.Text = "AutoDice  v10"
+    sub.Text = "AutoDice  v11"
     sub.Font = Enum.Font.Gotham
     sub.TextSize = 10
     sub.TextColor3 = Theme.Muted
@@ -606,7 +565,6 @@ local function buildUI()
     sub.ZIndex = 3
     sub.Parent = sidebar
 
-    -- Divider (no stroke, just dark line)
     local divider = Instance.new("Frame")
     divider.Size = UDim2.new(1, -32, 0, 1)
     divider.Position = UDim2.new(0, 16, 0, 118)
@@ -650,7 +608,6 @@ local function buildUI()
         glow.ZIndex = 1
         Instance.new("UICorner", glow).CornerRadius = UDim.new(0, 10)
 
-        -- Icon badge
         local badge = Instance.new("Frame", btn)
         badge.Size = UDim2.new(0, 28, 0, 28)
         badge.Position = UDim2.new(0, 8, 0.5, -14)
@@ -744,8 +701,10 @@ local function buildUI()
         end
     end)
 
-    -- Mode card
-    local modeCard = makeCard(mainPage, UDim2.new(1, -36, 0, 76), UDim2.new(0, 18, 0, 76))
+    --=================================================================
+    -- ★★★ MODE + AUTO ROLL รวมเป็น card เดียว ★★★
+    --=================================================================
+    local modeCard = makeCard(mainPage, UDim2.new(1, -36, 0, 106), UDim2.new(0, 18, 0, 76))
 
     local mcLbl = Instance.new("TextLabel", modeCard)
     mcLbl.Text = "MODE"
@@ -758,12 +717,13 @@ local function buildUI()
     mcLbl.TextXAlignment = Enum.TextXAlignment.Left
     mcLbl.ZIndex = 4
 
+    -- ปุ่มโหมด 3 ปุ่ม (AUTO / SPAM / BOTH)
     local modes = {"AUTO", "SPAM", "BOTH"}
     local modeBtns = {}
     for i, m in ipairs(modes) do
         local mb = Instance.new("TextButton")
-        mb.Size = UDim2.new(0, 82, 0, 32)
-        mb.Position = UDim2.new(0, 14 + (i-1) * 88, 0, 30)
+        mb.Size = UDim2.new(0, 82, 0, 30)
+        mb.Position = UDim2.new(0, 14 + (i-1) * 88, 0, 28)
         mb.BackgroundColor3 = Color3.fromRGB(16, 4, 32)
         mb.BackgroundTransparency = 0.4
         mb.BorderSizePixel = 0
@@ -796,13 +756,109 @@ local function buildUI()
         data.btn.TextColor3 = on and Theme.Text or Theme.TextDim
     end
 
-    -- Speed card
-    local speedCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 162))
+    -- Divider ใน card
+    local innerDiv = Instance.new("Frame", modeCard)
+    innerDiv.Size = UDim2.new(1, -28, 0, 1)
+    innerDiv.Position = UDim2.new(0, 14, 0, 66)
+    innerDiv.BackgroundColor3 = Color3.fromRGB(120, 60, 200)
+    innerDiv.BackgroundTransparency = 0.7
+    innerDiv.BorderSizePixel = 0
+    innerDiv.ZIndex = 4
+
+    -- 🎲 Auto Roll toggle ใน card เดียวกัน
+    local arLbl = Instance.new("TextLabel", modeCard)
+    arLbl.Text = "🎲 Auto Roll"
+    arLbl.Font = Enum.Font.GothamBold
+    arLbl.TextSize = 12
+    arLbl.TextColor3 = Theme.Text
+    arLbl.BackgroundTransparency = 1
+    arLbl.Size = UDim2.new(0.6, 0, 0, 20)
+    arLbl.Position = UDim2.new(0, 14, 0, 76)
+    arLbl.TextXAlignment = Enum.TextXAlignment.Left
+    arLbl.ZIndex = 4
+
+    local arInfo = Instance.new("TextLabel", modeCard)
+    arInfo.Text = "click to start rolling"
+    arInfo.Font = Enum.Font.Gotham
+    arInfo.TextSize = 9
+    arInfo.TextColor3 = Theme.AccentLt
+    arInfo.BackgroundTransparency = 1
+    arInfo.Size = UDim2.new(1, -100, 0, 12)
+    arInfo.Position = UDim2.new(0, 14, 0, 92)
+    arInfo.TextXAlignment = Enum.TextXAlignment.Left
+    arInfo.ZIndex = 4
+
+    -- Toggle Auto Roll (ม่วงไล่เฉด + เงา)
+    local arPill = Instance.new("TextButton", modeCard)
+    arPill.Size = UDim2.new(0, 62, 0, 28)
+    arPill.Position = UDim2.new(1, -76, 0, 78)
+    arPill.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
+    arPill.Text = ""
+    arPill.AutoButtonColor = false
+    arPill.ZIndex = 4
+    Instance.new("UICorner", arPill).CornerRadius = UDim.new(1, 0)
+
+    local arGrad = Instance.new("UIGradient", arPill)
+    arGrad.Rotation = 0
+    arGrad.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
+        ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
+    }
+
+    -- เงาขาว
+    local arHi = Instance.new("Frame", arPill)
+    arHi.Size = UDim2.new(0.6, 0, 0.6, 0)
+    arHi.Position = UDim2.new(0, 0, 0, 0)
+    arHi.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    arHi.BackgroundTransparency = 0.55
+    arHi.BorderSizePixel = 0
+    arHi.ZIndex = 1
+
+    local arHiGrad = Instance.new("UIGradient", arHi)
+    arHiGrad.Rotation = 135
+    arHiGrad.Transparency = NumberSequence.new{
+        NumberSequenceKeypoint.new(0.0, 0.35),
+        NumberSequenceKeypoint.new(0.7, 1.0),
+        NumberSequenceKeypoint.new(1.0, 1.0),
+    }
+    Instance.new("UICorner", arHi).CornerRadius = UDim.new(1, 0)
+
+    local arK = Instance.new("Frame", arPill)
+    arK.Size = UDim2.new(0, 22, 0, 22)
+    arK.Position = UDim2.new(0, 3, 0.5, -11)
+    arK.BackgroundColor3 = Color3.new(1,1,1)
+    arK.BorderSizePixel = 0
+    arK.ZIndex = 5
+    Instance.new("UICorner", arK).CornerRadius = UDim.new(1, 0)
+
+    arPill.MouseButton1Click:Connect(function()
+        if State.running then stop() else start() end
+        local on = State.running
+
+        arGrad.Color = on and ColorSequence.new{
+            ColorSequenceKeypoint.new(0.0, Theme.TogOnL),
+            ColorSequenceKeypoint.new(1.0, Theme.TogOnR),
+        } or ColorSequence.new{
+            ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
+            ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
+        }
+        TweenService:Create(arK, TweenInfo.new(0.25), {
+            Position = on and UDim2.new(1, -25, 0.5, -11) or UDim2.new(0, 3, 0.5, -11),
+        }):Play()
+        arInfo.Text = on and "rolling..." or "click to start rolling"
+        arInfo.TextColor3 = on and Theme.Good or Theme.AccentLt
+    end)
+
+    --=================================================================
+    -- SPEED CARD
+    --=================================================================
+    local speedCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 192))
 
     local spdLbl = Instance.new("TextLabel", speedCard)
     spdLbl.Text = "SPAM SPEED"
     spdLbl.Font = Enum.Font.GothamBold
-    spdLbl.TextSize = 9.5    spdLbl.TextColor3 = Theme.AccentLt
+    spdLbl.TextSize = 9.5
+    spdLbl.TextColor3 = Theme.AccentLt
     spdLbl.BackgroundTransparency = 1
     spdLbl.Size = UDim2.new(0.5, 0, 0, 14)
     spdLbl.Position = UDim2.new(0, 12, 0, 8)
@@ -877,8 +933,10 @@ local function buildUI()
         end
     end)
 
-    -- Collect card
-    local collectCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 232))
+    --=================================================================
+    -- COLLECT CARD
+    --=================================================================
+    local collectCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 262))
 
     makeToggle(collectCard, 8, "💰 AFK Collect Money",
         State.autoCollect,
@@ -897,97 +955,6 @@ local function buildUI()
     acInfo.Position = UDim2.new(0, 14, 0, 38)
     acInfo.TextXAlignment = Enum.TextXAlignment.Left
     acInfo.ZIndex = 4
-
-    --=================================================================
-    -- 🎲 TOGGLE AUTO ROLL (ใหญ่)
-    --=================================================================
-    local autoRollCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 1, -76))
-
-    local arLbl = Instance.new("TextLabel", autoRollCard)
-    arLbl.Text = "🎲 Auto Roll"
-    arLbl.Font = Enum.Font.GothamBold
-    arLbl.TextSize = 13
-    arLbl.TextColor3 = Theme.Text
-    arLbl.BackgroundTransparency = 1
-    arLbl.Size = UDim2.new(0.75, 0, 0, 20)
-    arLbl.Position = UDim2.new(0, 14, 0, 10)
-    arLbl.TextXAlignment = Enum.TextXAlignment.Left
-    arLbl.ZIndex = 4
-
-    local arInfo = Instance.new("TextLabel", autoRollCard)
-    arInfo.Text = "click to start rolling"
-    arInfo.Font = Enum.Font.Gotham
-    arInfo.TextSize = 9.5
-    arInfo.TextColor3 = Theme.AccentLt
-    arInfo.BackgroundTransparency = 1
-    arInfo.Size = UDim2.new(1, -28, 0, 14)
-    arInfo.Position = UDim2.new(0, 14, 0, 34)
-    arInfo.TextXAlignment = Enum.TextXAlignment.Left
-    arInfo.ZIndex = 4
-
-    -- Toggle ใหญ่
-    local arPill = Instance.new("TextButton", autoRollCard)
-    arPill.Size = UDim2.new(0, 62, 0, 30)
-    arPill.Position = UDim2.new(1, -76, 0.5, -15)
-    arPill.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
-    arPill.Text = ""
-    arPill.AutoButtonColor = false
-    arPill.ZIndex = 4
-    Instance.new("UICorner", arPill).CornerRadius = UDim.new(1, 0)
-
-    local arGrad = Instance.new("UIGradient", arPill)
-    arGrad.Rotation = 0
-    arGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
-        ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
-    }
-
-    -- เงาขาวเฉียง
-    local arHi = Instance.new("Frame", arPill)
-    arHi.Size = UDim2.new(0.55, 0, 0.55, 0)
-    arHi.Position = UDim2.new(0, 0, 0, 0)
-    arHi.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    arHi.BackgroundTransparency = 0.55
-    arHi.BorderSizePixel = 0
-    arHi.ZIndex = 1
-
-    local arHiGrad = Instance.new("UIGradient", arHi)
-    arHiGrad.Rotation = 135
-    arHiGrad.Transparency = NumberSequence.new{
-        NumberSequenceKeypoint.new(0.0, 0.4),
-        NumberSequenceKeypoint.new(0.7, 1.0),
-        NumberSequenceKeypoint.new(1.0, 1.0),
-    }
-    Instance.new("UICorner", arHi).CornerRadius = UDim.new(1, 0)
-
-    local arK = Instance.new("Frame", arPill)
-    arK.Size = UDim2.new(0, 24, 0, 24)
-    arK.Position = UDim2.new(0, 3, 0.5, -12)
-    arK.BackgroundColor3 = Color3.new(1,1,1)
-    arK.BorderSizePixel = 0
-    arK.ZIndex = 5
-    Instance.new("UICorner", arK).CornerRadius = UDim.new(1, 0)
-
-    arPill.MouseButton1Click:Connect(function()
-        if State.running then stop() else start() end
-        local on = State.running
-
-        arGrad.Color = on and ColorSequence.new{
-            ColorSequenceKeypoint.new(0.0, Theme.TogOnL),
-            ColorSequenceKeypoint.new(1.0, Theme.TogOnR),
-        } or ColorSequence.new{
-            ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
-            ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
-        }
-        TweenService:Create(arPill, TweenInfo.new(0.25), {
-            BackgroundColor3 = on and Theme.Accent or Color3.fromRGB(10, 3, 20),
-        }):Play()
-        TweenService:Create(arK, TweenInfo.new(0.25), {
-            Position = on and UDim2.new(1, -27, 0.5, -12) or UDim2.new(0, 3, 0.5, -12),
-        }):Play()
-        arInfo.Text = on and "rolling..." or "click to start rolling"
-        arInfo.TextColor3 = on and Theme.Good or Theme.AccentLt
-    end)
 
     --=================================================================
     -- SETTINGS PAGE
@@ -1011,7 +978,6 @@ local function buildUI()
     sTitle.TextXAlignment = Enum.TextXAlignment.Left
     sTitle.ZIndex = 4
 
-    -- Animation toggles
     local setCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 90), UDim2.new(0, 18, 0, 76))
 
     makeToggle(setCard, 12, "Bypass Roll Animation",
@@ -1022,7 +988,6 @@ local function buildUI()
         State.killCutscene,
         function(v) State.killCutscene = v end)
 
-    -- Plot range
     local rangeCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 76), UDim2.new(0, 18, 0, 178))
 
     local rcLbl = Instance.new("TextLabel", rangeCard)
@@ -1168,7 +1133,7 @@ local function buildUI()
         State.minimized = false
         win.Visible = true
         miniBtn.Visible = false
-        if blur then blur.Size = 18 end
+        if blur then blur.Size = 10 end
     end)
 
     -- Drag
@@ -1211,4 +1176,4 @@ if not ok then
     warn("[AxionHub] buildUI ERROR:", err)
 end
 
-print("[AxionHub] v10 ready.")
+print("[AxionHub] v11 ready.")
