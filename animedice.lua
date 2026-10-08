@@ -12,10 +12,9 @@ local AxionHub = {
 
 -- Constants.
 local HUB_NAME = "AxionHub_AutoDice"
-local HUB_VERSION = "v15"
+local HUB_VERSION = "v16"
 local WHITE = Color3.new(1, 1, 1)
-local SIDEBAR_WIDTH = 155
-local WINDOW_GAP = 4
+local SIDEBAR_WIDTH = 150
 local CORNER_RADIUS = 12
 
 -- Services.
@@ -29,36 +28,29 @@ local lighting = game:GetService("Lighting")
 local localPlayer = playersService.LocalPlayer
 
 local Config = {
-	-- Neon purple accents.
-	accent = Color3.fromRGB(157, 78, 221),
-	accentDim = Color3.fromRGB(124, 58, 237),
-	accentLight = Color3.fromRGB(203, 160, 252),
+	-- Logo accents: blue-violet to magenta-purple.
+	accentBlue = Color3.fromRGB(84, 38, 232),
+	accentPink = Color3.fromRGB(172, 44, 248),
+	accentLight = Color3.fromRGB(206, 164, 255),
 
-	-- Sidebar is a flat slate-black, content is a charcoal to black gradient.
-	sidebar = Color3.fromRGB(24, 18, 32),
-	bgTop = Color3.fromRGB(30, 26, 36),
-	bgBot = Color3.fromRGB(8, 5, 12),
-	sidebarTransparency = 0.3,
-	contentTransparency = 0.05,
+	-- Backgrounds: near-black with a purple glow.
+	bgTop = Color3.fromRGB(26, 12, 48),
+	bgBot = Color3.fromRGB(4, 2, 9),
+	sidebarTop = Color3.fromRGB(14, 6, 26),
+	sidebarBot = Color3.fromRGB(2, 1, 5),
 
 	-- Cards.
-	cardTop = Color3.fromRGB(56, 22, 96),
-	cardMid = Color3.fromRGB(40, 16, 72),
-	cardBot = Color3.fromRGB(18, 6, 36),
+	cardTop = Color3.fromRGB(44, 20, 82),
+	cardBot = Color3.fromRGB(14, 6, 28),
 
-	-- Chips: solid colors so labels stay readable.
-	chipOff = Color3.fromRGB(30, 18, 44),
-	chipHover = Color3.fromRGB(46, 30, 66),
-	chipOn = Color3.fromRGB(157, 78, 221),
-	chipText = Color3.fromRGB(240, 230, 255),
-
-	-- Toggle pills.
-	slateTop = Color3.fromRGB(66, 52, 102),
-	slateBot = Color3.fromRGB(42, 32, 70),
+	-- Capsules.
+	chipOff = Color3.fromRGB(26, 14, 44),
+	chipHover = Color3.fromRGB(44, 26, 74),
+	track = Color3.fromRGB(10, 5, 20),
 
 	text = Color3.fromRGB(255, 255, 255),
-	textDim = Color3.fromRGB(222, 210, 244),
-	muted = Color3.fromRGB(150, 130, 185),
+	textDim = Color3.fromRGB(224, 212, 246),
+	muted = Color3.fromRGB(150, 132, 188),
 	good = Color3.fromRGB(130, 255, 180),
 	bad = Color3.fromRGB(255, 100, 130),
 
@@ -67,6 +59,13 @@ local Config = {
 	fontMedium = Enum.Font.GothamMedium,
 
 	blurSize = 6,
+}
+
+-- Short mode descriptions shown under the mode capsules.
+local MODE_INFO = {
+	AUTO = "ให้เซิร์ฟเวอร์ออโต้โรลให้ เบาและเสถียร",
+	SPAM = "ยิงรีโมทโรลรัวๆ ตามความเร็วที่ตั้ง",
+	BOTH = "ออโต้ + สแปมพร้อมกัน เร็วที่สุด",
 }
 
 local State = {
@@ -366,17 +365,29 @@ local function createCorner(parent, radius)
 	return corner
 end
 
-local function createGradient(parent, rotation, colorSequence, transparencySequence)
+local function createGradient(parent, rotation, colorSequence)
 	local gradient = Instance.new("UIGradient")
 	gradient.Rotation = rotation or 90
-	if colorSequence then
-		gradient.Color = colorSequence
-	end
-	if transparencySequence then
-		gradient.Transparency = transparencySequence
-	end
+	gradient.Color = colorSequence
 	gradient.Parent = parent
 	return gradient
+end
+
+-- Shared brand gradient (blue-violet to magenta-purple).
+local function accentSequence()
+	return ColorSequence.new(Config.accentBlue, Config.accentPink)
+end
+
+-- Gradient outline so frames glow like the logo.
+local function createStroke(parent, thickness, transparency)
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = WHITE
+	stroke.Thickness = thickness
+	stroke.Transparency = transparency
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = parent
+	createGradient(stroke, 45, accentSequence())
+	return stroke
 end
 
 local function makeLabel(parent, text, size, position, font, textSize, color, alignment)
@@ -394,59 +405,93 @@ local function makeLabel(parent, text, size, position, font, textSize, color, al
 	return label
 end
 
--- Card: borderless gradient fill with rounded corners.
+-- Card: purple to black gradient with a faint glowing outline.
 local function makeCard(parent, size, position)
 	local card = Instance.new("Frame")
 	card.Size = size
 	card.Position = position
 	card.BackgroundColor3 = WHITE
-	card.BackgroundTransparency = 0.05
+	card.BackgroundTransparency = 0.08
 	card.BorderSizePixel = 0
 	card.ZIndex = 3
 	card.Parent = parent
 	createCorner(card, CORNER_RADIUS)
-
-	createGradient(
-		card,
-		90,
-		ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Config.cardTop),
-			ColorSequenceKeypoint.new(0.5, Config.cardMid),
-			ColorSequenceKeypoint.new(1, Config.cardBot),
-		})
-	)
+	createGradient(card, 100, ColorSequence.new(Config.cardTop, Config.cardBot))
+	createStroke(card, 1, 0.65)
 
 	return card
 end
 
--- Chip: solid color button (no gradient, so text is never tinted).
-local function makeChip(button, offTransparency)
+-- Capsule: dark base, gradient glow fades in when active, label stays untinted.
+local function makeChip(parent, size, position, text, textSize, radius)
+	local button = Instance.new("TextButton")
+	button.Size = size
+	button.Position = position
 	button.BackgroundColor3 = Config.chipOff
-	button.BackgroundTransparency = offTransparency or 0
-	button.TextColor3 = Config.chipText
+	button.BorderSizePixel = 0
+	button.Text = ""
+	button.AutoButtonColor = false
+	button.ZIndex = 3
+	button.Parent = parent
+	createCorner(button, radius)
+
+	local glow = Instance.new("Frame")
+	glow.Size = UDim2.new(1, 0, 1, 0)
+	glow.BackgroundColor3 = WHITE
+	glow.BackgroundTransparency = 1
+	glow.BorderSizePixel = 0
+	glow.ZIndex = 4
+	glow.Parent = button
+	createCorner(glow, radius)
+	createGradient(glow, 20, accentSequence())
+
+	local label = makeLabel(
+		button,
+		text,
+		UDim2.new(1, 0, 1, 0),
+		UDim2.new(0, 0, 0, 0),
+		Config.fontBold,
+		textSize,
+		Config.textDim,
+		Enum.TextXAlignment.Center
+	)
+	label.ZIndex = 5
 
 	return {
 		button = button,
+		glow = glow,
+		label = label,
 		on = false,
-		offT = offTransparency or 0,
 	}
 end
 
 local function refreshChip(chip, hover, instant)
-	local goal = {
-		BackgroundColor3 = chip.on and Config.chipOn or (hover and Config.chipHover or Config.chipOff),
-		BackgroundTransparency = chip.on and 0 or chip.offT,
-		TextColor3 = chip.on and Config.text or Config.chipText,
+	local buttonGoal = {
+		BackgroundColor3 = hover and Config.chipHover or Config.chipOff,
+	}
+	local glowGoal = {
+		BackgroundTransparency = chip.on and 0 or 1,
+	}
+	local labelGoal = {
+		TextColor3 = chip.on and Config.text or Config.textDim,
 	}
 
 	if instant then
-		for property, value in pairs(goal) do
+		for property, value in pairs(buttonGoal) do
 			chip.button[property] = value
+		end
+		for property, value in pairs(glowGoal) do
+			chip.glow[property] = value
+		end
+		for property, value in pairs(labelGoal) do
+			chip.label[property] = value
 		end
 		return
 	end
 
-	tween(chip.button, 0.18, goal)
+	tween(chip.button, 0.18, buttonGoal)
+	tween(chip.glow, 0.22, glowGoal)
+	tween(chip.label, 0.18, labelGoal)
 end
 
 local function styleChip(chip, on, instant)
@@ -464,7 +509,7 @@ local function addHover(chip)
 	end))
 end
 
--- Pill toggle (fixed 46x24 with 18px knob so every toggle matches).
+-- Pill toggle: gradient capsule fill fades in, knob slides.
 local PILL_SIZE = UDim2.new(0, 46, 0, 24)
 local KNOB_SIZE = UDim2.new(0, 18, 0, 18)
 local KNOB_PAD = 3
@@ -473,16 +518,28 @@ local function buildPill(parent, position)
 	local pill = Instance.new("TextButton")
 	pill.Size = PILL_SIZE
 	pill.Position = position
-	pill.BackgroundColor3 = Config.slateBot
+	pill.BackgroundColor3 = Config.track
 	pill.BorderSizePixel = 0
 	pill.Text = ""
 	pill.AutoButtonColor = false
 	pill.ZIndex = 5
 	pill.Parent = parent
 	createCorner(pill, 999)
+	createStroke(pill, 1, 0.6)
+
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.new(1, 0, 1, 0)
+	fill.BackgroundColor3 = WHITE
+	fill.BackgroundTransparency = 1
+	fill.BorderSizePixel = 0
+	fill.ZIndex = 6
+	fill.Parent = pill
+	createCorner(fill, 999)
+	createGradient(fill, 0, accentSequence())
 
 	local parts = {
 		pill = pill,
+		fill = fill,
 		offPos = UDim2.new(0, KNOB_PAD, 0.5, -9),
 		onPos = UDim2.new(1, -(18 + KNOB_PAD), 0.5, -9),
 	}
@@ -490,9 +547,9 @@ local function buildPill(parent, position)
 	local knob = Instance.new("Frame")
 	knob.Size = KNOB_SIZE
 	knob.Position = parts.offPos
-	knob.BackgroundColor3 = Config.textDim
+	knob.BackgroundColor3 = Config.muted
 	knob.BorderSizePixel = 0
-	knob.ZIndex = 6
+	knob.ZIndex = 7
 	knob.Parent = pill
 	createCorner(knob, 999)
 	parts.knob = knob
@@ -501,17 +558,17 @@ local function buildPill(parent, position)
 end
 
 local function stylePill(parts, on, instant)
-	local pillGoal = {
-		BackgroundColor3 = on and Config.chipOn or Config.slateBot,
+	local fillGoal = {
+		BackgroundTransparency = on and 0 or 1,
 	}
 	local knobGoal = {
 		Position = on and parts.onPos or parts.offPos,
-		BackgroundColor3 = on and WHITE or Config.textDim,
+		BackgroundColor3 = on and WHITE or Config.muted,
 	}
 
 	if instant then
-		for property, value in pairs(pillGoal) do
-			parts.pill[property] = value
+		for property, value in pairs(fillGoal) do
+			parts.fill[property] = value
 		end
 		for property, value in pairs(knobGoal) do
 			parts.knob[property] = value
@@ -519,7 +576,7 @@ local function stylePill(parts, on, instant)
 		return
 	end
 
-	tween(parts.pill, 0.2, pillGoal)
+	tween(parts.fill, 0.2, fillGoal)
 	tween(parts.knob, 0.22, knobGoal)
 end
 
@@ -575,7 +632,7 @@ local function buildUI()
 	miniBtn.Name = "MiniBtn"
 	miniBtn.Size = UDim2.new(0, 48, 0, 48)
 	miniBtn.Position = UDim2.new(0, 20, 0, 100)
-	miniBtn.BackgroundColor3 = Config.chipOn
+	miniBtn.BackgroundColor3 = WHITE
 	miniBtn.BorderSizePixel = 0
 	miniBtn.Text = ""
 	miniBtn.AutoButtonColor = false
@@ -583,43 +640,53 @@ local function buildUI()
 	miniBtn.Active = true
 	miniBtn.Draggable = true
 	miniBtn.Parent = gui
-	createCorner(miniBtn, CORNER_RADIUS)
+	createCorner(miniBtn, 999)
+	createGradient(miniBtn, 45, accentSequence())
+	createStroke(miniBtn, 1.5, 0.3)
 
 	makeLabel(miniBtn, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 22, Config.text, Enum.TextXAlignment.Center)
 
 	-- One window holds the sidebar and content side by side.
 	local win = Instance.new("Frame")
 	win.Name = "Window"
-	win.Size = UDim2.new(0, 580, 0, 400)
-	win.Position = UDim2.new(0.5, -290, 0.5, -200)
-	win.BackgroundTransparency = 1
+	win.Size = UDim2.new(0, 590, 0, 392)
+	win.Position = UDim2.new(0.5, -295, 0.5, -196)
+	win.BackgroundColor3 = WHITE
+	win.BackgroundTransparency = 0.04
 	win.BorderSizePixel = 0
 	win.Active = true
 	win.Parent = gui
+	createCorner(win, CORNER_RADIUS + 4)
+	createGradient(win, 115, ColorSequence.new(Config.bgTop, Config.bgBot))
+	createStroke(win, 1.5, 0.15)
 
-	-- Sidebar: flat slate-black, softer than the content.
+	-- Sidebar: deeper black so the content panel stands out.
 	local sidebar = Instance.new("Frame")
-	sidebar.Size = UDim2.new(0, SIDEBAR_WIDTH - WINDOW_GAP, 1, 0)
-	sidebar.BackgroundColor3 = Config.sidebar
-	sidebar.BackgroundTransparency = Config.sidebarTransparency
+	sidebar.Size = UDim2.new(0, SIDEBAR_WIDTH, 1, 0)
+	sidebar.BackgroundColor3 = WHITE
+	sidebar.BackgroundTransparency = 0.12
 	sidebar.BorderSizePixel = 0
+	sidebar.ZIndex = 2
 	sidebar.Parent = win
-	createCorner(sidebar, CORNER_RADIUS + 2)
+	createCorner(sidebar, CORNER_RADIUS + 4)
+	createGradient(sidebar, 90, ColorSequence.new(Config.sidebarTop, Config.sidebarBot))
 
 	local logoBox = Instance.new("Frame")
-	logoBox.Size = UDim2.new(0, 44, 0, 44)
-	logoBox.Position = UDim2.new(0, 18, 0, 18)
-	logoBox.BackgroundColor3 = Config.chipOn
+	logoBox.Size = UDim2.new(0, 46, 0, 46)
+	logoBox.Position = UDim2.new(0, 16, 0, 18)
+	logoBox.BackgroundColor3 = WHITE
 	logoBox.BorderSizePixel = 0
 	logoBox.ZIndex = 3
 	logoBox.Parent = sidebar
 	createCorner(logoBox, CORNER_RADIUS)
+	createGradient(logoBox, 45, accentSequence())
+	createStroke(logoBox, 1, 0.4)
 
 	makeLabel(logoBox, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 22, Config.text, Enum.TextXAlignment.Center)
 
-	makeLabel(sidebar, "AxionHub", UDim2.new(1, -20, 0, 18), UDim2.new(0, 18, 0, 70), Config.fontBold, 15, Config.text)
+	makeLabel(sidebar, "AxionHub", UDim2.new(1, -20, 0, 18), UDim2.new(0, 16, 0, 72), Config.fontBold, 15, Config.text)
 
-	makeLabel(sidebar, "AutoDice  " .. HUB_VERSION, UDim2.new(1, -20, 0, 14), UDim2.new(0, 18, 0, 88), Config.font, 10, Config.textDim)
+	makeLabel(sidebar, "AutoDice  " .. HUB_VERSION, UDim2.new(1, -20, 0, 14), UDim2.new(0, 16, 0, 90), Config.font, 10, Config.accentLight)
 
 	local pages = {
 		{ id = "MAIN", icon = "🏠", label = "Main", desc = "dice & collect" },
@@ -629,52 +696,49 @@ local function buildUI()
 	local pageButtons = {}
 
 	for index, page in ipairs(pages) do
-		local button = Instance.new("TextButton")
-		button.Size = UDim2.new(1, -24, 0, 44)
-		button.Position = UDim2.new(0, 12, 0, 132 + (index - 1) * 50)
-		button.BorderSizePixel = 0
-		button.Text = ""
-		button.AutoButtonColor = false
-		button.ZIndex = 3
-		button.Parent = sidebar
-		createCorner(button, CORNER_RADIUS - 2)
-
-		local chip = makeChip(button, 0.35)
+		local chip = makeChip(
+			sidebar,
+			UDim2.new(1, -24, 0, 44),
+			UDim2.new(0, 12, 0, 132 + (index - 1) * 50),
+			"",
+			11,
+			22
+		)
 		addHover(chip)
 
 		local badge = Instance.new("Frame")
 		badge.Size = UDim2.new(0, 28, 0, 28)
 		badge.Position = UDim2.new(0, 8, 0.5, -14)
-		badge.BackgroundColor3 = Config.cardMid
-		badge.BackgroundTransparency = 0.1
+		badge.BackgroundColor3 = Config.bgBot
+		badge.BackgroundTransparency = 0.35
 		badge.BorderSizePixel = 0
-		badge.ZIndex = 4
-		badge.Parent = button
-		createCorner(badge, 8)
+		badge.ZIndex = 6
+		badge.Parent = chip.button
+		createCorner(badge, 999)
 
-		makeLabel(badge, page.icon, UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 14, Config.accentLight, Enum.TextXAlignment.Center)
+		local icon = makeLabel(badge, page.icon, UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 14, Config.accentLight, Enum.TextXAlignment.Center)
+		icon.ZIndex = 7
 
-		local nameLabel = makeLabel(button, page.label, UDim2.new(1, -50, 0, 14), UDim2.new(0, 44, 0, 7), Config.fontBold, 11.5, Config.textDim)
-		local descLabel = makeLabel(button, page.desc, UDim2.new(1, -50, 0, 12), UDim2.new(0, 44, 0, 23), Config.font, 9, Config.muted)
+		local nameLabel = makeLabel(chip.button, page.label, UDim2.new(1, -50, 0, 14), UDim2.new(0, 44, 0, 7), Config.fontBold, 11.5, Config.textDim)
+		nameLabel.ZIndex = 6
+		local descLabel = makeLabel(chip.button, page.desc, UDim2.new(1, -50, 0, 12), UDim2.new(0, 44, 0, 23), Config.font, 9, Config.muted)
+		descLabel.ZIndex = 6
 
 		pageButtons[page.id] = {
-			button = button,
+			button = chip.button,
 			chip = chip,
 			name = nameLabel,
 			desc = descLabel,
 		}
 	end
 
-	-- Content panel: charcoal to black gradient, more opaque than the sidebar.
+	-- Content panel (transparent, window gradient shows through).
 	local content = Instance.new("Frame")
 	content.Size = UDim2.new(1, -SIDEBAR_WIDTH, 1, 0)
 	content.Position = UDim2.new(0, SIDEBAR_WIDTH, 0, 0)
-	content.BackgroundColor3 = WHITE
-	content.BackgroundTransparency = Config.contentTransparency
+	content.BackgroundTransparency = 1
 	content.BorderSizePixel = 0
 	content.Parent = win
-	createCorner(content, CORNER_RADIUS + 2)
-	createGradient(content, 90, ColorSequence.new(Config.bgTop, Config.bgBot))
 
 	-- Main page.
 	local mainPage = Instance.new("Frame")
@@ -709,9 +773,11 @@ local function buildUI()
 	end)
 
 	-- Mode card.
-	local modeCard = makeCard(mainPage, UDim2.new(1, -36, 0, 106), UDim2.new(0, 18, 0, 70))
+	local modeCard = makeCard(mainPage, UDim2.new(1, -36, 0, 132), UDim2.new(0, 18, 0, 70))
 
 	makeLabel(modeCard, "MODE", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
+
+	local modeDesc = makeLabel(modeCard, MODE_INFO[State.mode], UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 66), Config.font, 10, Config.muted)
 
 	local modes = { "AUTO", "SPAM", "BOTH" }
 	local modeChips = {}
@@ -720,26 +786,23 @@ local function buildUI()
 		for key, chip in pairs(modeChips) do
 			styleChip(chip, key == State.mode)
 		end
+
+		modeDesc.Text = MODE_INFO[State.mode]
 	end
 
 	for index, mode in ipairs(modes) do
-		local button = Instance.new("TextButton")
-		button.Size = UDim2.new(0, 82, 0, 32)
-		button.Position = UDim2.new(0, 14 + (index - 1) * 88, 0, 28)
-		button.BorderSizePixel = 0
-		button.Text = mode
-		button.Font = Config.fontBold
-		button.TextSize = 11
-		button.AutoButtonColor = false
-		button.ZIndex = 4
-		button.Parent = modeCard
-		createCorner(button, 8)
-
-		local chip = makeChip(button, 0)
+		local chip = makeChip(
+			modeCard,
+			UDim2.new(0, 82, 0, 30),
+			UDim2.new(0, 14 + (index - 1) * 90, 0, 28),
+			mode,
+			11,
+			999
+		)
 		modeChips[mode] = chip
 		addHover(chip)
 
-		track(button.MouseButton1Click:Connect(function()
+		track(chip.button.MouseButton1Click:Connect(function()
 			State.mode = mode
 			refreshModes()
 		end))
@@ -751,7 +814,7 @@ local function buildUI()
 
 	-- Same toggle builder as AFK Collect so both switches match.
 	local autoRollToggle
-	autoRollToggle = makeToggle(modeCard, 64, "🎲 Auto Roll", false, function(value)
+	autoRollToggle = makeToggle(modeCard, 88, "🎲 Auto Roll", false, function(value)
 		if value then
 			startDice()
 		else
@@ -762,7 +825,7 @@ local function buildUI()
 	end)
 
 	-- Speed card.
-	local speedCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 186))
+	local speedCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 212))
 
 	makeLabel(speedCard, "SPAM SPEED", UDim2.new(0.5, 0, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
 
@@ -771,7 +834,7 @@ local function buildUI()
 	local sliderTrack = Instance.new("TextButton")
 	sliderTrack.Size = UDim2.new(1, -28, 0, 10)
 	sliderTrack.Position = UDim2.new(0, 14, 0, 36)
-	sliderTrack.BackgroundColor3 = Config.bgBot
+	sliderTrack.BackgroundColor3 = Config.track
 	sliderTrack.BorderSizePixel = 0
 	sliderTrack.Text = ""
 	sliderTrack.AutoButtonColor = false
@@ -786,22 +849,23 @@ local function buildUI()
 	fill.ZIndex = 5
 	fill.Parent = sliderTrack
 	createCorner(fill, 999)
-	createGradient(fill, 0, ColorSequence.new(Config.accentDim, Config.accent))
+	createGradient(fill, 0, accentSequence())
 
 	local sliderKnob = Instance.new("Frame")
-	sliderKnob.Size = UDim2.new(0, 14, 0, 14)
-	sliderKnob.Position = UDim2.new(0.5, -7, 0.5, -7)
-	sliderKnob.BackgroundColor3 = Config.accentLight
+	sliderKnob.Size = UDim2.new(0, 16, 0, 16)
+	sliderKnob.Position = UDim2.new(0.5, -8, 0.5, -8)
+	sliderKnob.BackgroundColor3 = WHITE
 	sliderKnob.BorderSizePixel = 0
 	sliderKnob.ZIndex = 6
 	sliderKnob.Parent = sliderTrack
 	createCorner(sliderKnob, 999)
+	createStroke(sliderKnob, 2, 0)
 
 	local draggingSlider = false
 
 	local function applyRelative(relative)
 		fill.Size = UDim2.new(relative, 0, 1, 0)
-		sliderKnob.Position = UDim2.new(relative, -7, 0.5, -7)
+		sliderKnob.Position = UDim2.new(relative, -8, 0.5, -8)
 
 		local rate = math.floor(20 + relative * 180)
 		State.spamSpeed = 1 / rate
@@ -815,7 +879,7 @@ local function buildUI()
 	-- Match the slider to the default spam speed.
 	local initialRate = math.clamp(math.floor(1 / State.spamSpeed + 0.5), 20, 200)
 	fill.Size = UDim2.new((initialRate - 20) / 180, 0, 1, 0)
-	sliderKnob.Position = UDim2.new((initialRate - 20) / 180, -7, 0.5, -7)
+	sliderKnob.Position = UDim2.new((initialRate - 20) / 180, -8, 0.5, -8)
 	speedValue.Text = initialRate .. " / sec"
 
 	track(sliderTrack.InputBegan:Connect(function(input)
@@ -841,7 +905,7 @@ local function buildUI()
 	end))
 
 	-- Collect card.
-	local collectCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 258))
+	local collectCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 284))
 
 	makeToggle(collectCard, 4, "💰 AFK Collect Money", State.autoCollect, function(value)
 		if value then
@@ -882,7 +946,7 @@ local function buildUI()
 		State.killCutscene = value
 	end)
 
-	local rangeCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 76), UDim2.new(0, 18, 0, 172))
+	local rangeCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 80), UDim2.new(0, 18, 0, 172))
 
 	makeLabel(rangeCard, "PLOT RANGE", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
 
@@ -897,23 +961,11 @@ local function buildUI()
 	end
 
 	local function makeRangeButton(text, x, value)
-		local button = Instance.new("TextButton")
-		button.Size = UDim2.new(0, 52, 0, 26)
-		button.Position = UDim2.new(0, x, 0, 44)
-		button.BorderSizePixel = 0
-		button.Text = text
-		button.Font = Config.fontBold
-		button.TextSize = 10
-		button.AutoButtonColor = false
-		button.ZIndex = 4
-		button.Parent = rangeCard
-		createCorner(button, 8)
-
-		local chip = makeChip(button, 0)
+		local chip = makeChip(rangeCard, UDim2.new(0, 56, 0, 26), UDim2.new(0, x, 0, 46), text, 10, 999)
 		rangeChips[value] = chip
 		addHover(chip)
 
-		track(button.MouseButton1Click:Connect(function()
+		track(chip.button.MouseButton1Click:Connect(function()
 			State.plotMin = 1
 			State.plotMax = value
 			rangeValue.Text = string.format("1 → %d", State.plotMax)
@@ -922,8 +974,8 @@ local function buildUI()
 	end
 
 	makeRangeButton("1 → 4", 14, 4)
-	makeRangeButton("1 → 8", 72, 8)
-	makeRangeButton("1 → 16", 130, 16)
+	makeRangeButton("1 → 8", 76, 8)
+	makeRangeButton("1 → 16", 138, 16)
 
 	for value, chip in pairs(rangeChips) do
 		styleChip(chip, State.plotMax == value, true)
@@ -934,7 +986,7 @@ local function buildUI()
 		for id, data in pairs(pageButtons) do
 			local on = id == State.page
 			data.name.TextColor3 = on and Config.text or Config.textDim
-			data.desc.TextColor3 = on and Config.accentLight or Config.muted
+			data.desc.TextColor3 = on and Config.text or Config.muted
 			styleChip(data.chip, on, instant)
 		end
 
@@ -957,17 +1009,8 @@ local function buildUI()
 	topButtons.ZIndex = 10
 	topButtons.Parent = content
 
-	local minBtn = Instance.new("TextButton")
-	minBtn.Size = UDim2.new(0, 22, 0, 22)
-	minBtn.BorderSizePixel = 0
-	minBtn.Text = "—"
-	minBtn.Font = Config.fontBold
-	minBtn.TextSize = 14
-	minBtn.AutoButtonColor = false
-	minBtn.ZIndex = 11
-	minBtn.Parent = topButtons
-	createCorner(minBtn, 999)
-	local minChip = makeChip(minBtn, 0)
+	local minChip = makeChip(topButtons, UDim2.new(0, 22, 0, 22), UDim2.new(0, 0, 0, 0), "—", 13, 999)
+	minChip.button.ZIndex = 11
 	styleChip(minChip, false, true)
 	addHover(minChip)
 
@@ -986,7 +1029,7 @@ local function buildUI()
 	createCorner(closeBtn, 999)
 
 	track(closeBtn.MouseEnter:Connect(function()
-		tween(closeBtn, 0.15, { BackgroundColor3 = Color3.fromRGB(170, 44, 84) })
+		tween(closeBtn, 0.15, { BackgroundColor3 = Color3.fromRGB(190, 48, 92) })
 	end))
 	track(closeBtn.MouseLeave:Connect(function()
 		tween(closeBtn, 0.15, { BackgroundColor3 = Color3.fromRGB(120, 32, 62) })
@@ -999,7 +1042,7 @@ local function buildUI()
 	blur.Parent = lighting
 	AxionHub.blur = blur
 
-	track(minBtn.MouseButton1Click:Connect(function()
+	track(minChip.button.MouseButton1Click:Connect(function()
 		State.minimized = true
 		win.Visible = false
 		miniBtn.Visible = true
