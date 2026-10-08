@@ -1,6 +1,6 @@
 --[[
-    AxionHub AutoDice v11
-    Fullstack Developer Edition
+    AxionHub AutoDice v11.1
+    Hotfix: UI ไม่ขึ้น / blur ค้าง
 --]]
 
 local Services = {
@@ -20,7 +20,7 @@ local Lighting = Services.Lighting
 
 local Config = {
     Name = "AxionHub_AutoDice",
-    Version = "v11",
+    Version = "v11.1",
     Accent = Color3.fromRGB(168, 85, 247),
     AccentDim = Color3.fromRGB(124, 58, 237),
     AccentLight = Color3.fromRGB(222, 192, 255),
@@ -45,23 +45,12 @@ local Config = {
 }
 
 local State = {
-    page = "MAIN",
-    mode = "AUTO",
-    running = false,
-    rolls = 0,
-    autoRollOn = false,
-    thread = nil,
-    spamSpeed = 0.03,
-    bypassAnim = true,
-    killCutscene = true,
-    autoCollect = false,
-    collectThread = nil,
-    collectRate = 0.5,
-    plotMin = 1,
-    plotMax = 16,
-    collected = 0,
-    lastPlot = 0,
-    collectStarted = false,
+    page = "MAIN", mode = "AUTO", running = false, rolls = 0,
+    autoRollOn = false, thread = nil, spamSpeed = 0.03,
+    bypassAnim = true, killCutscene = true,
+    autoCollect = false, collectThread = nil,
+    collectRate = 0.5, plotMin = 1, plotMax = 16,
+    collected = 0, lastPlot = 0, collectStarted = false,
     minimized = false,
 }
 
@@ -273,14 +262,6 @@ local function buildUI()
     gui.DisplayOrder = 999
     gui.Parent = parent
 
-    local blur = Instance.new("BlurEffect")
-    blur.Name = "AxionHubBlur_Internal"
-    blur.Size = 12
-    blur.Parent = Lighting
-    gui.Destroying:Connect(function()
-        pcall(function() blur:Destroy() end)
-    end)
-
     local function corner(parent, r)
         local c = Instance.new("UICorner", parent)
         c.CornerRadius = UDim.new(0, r)
@@ -298,7 +279,6 @@ local function buildUI()
 
     local function toggleGlow(parent)
         local hl = Instance.new("Frame", parent)
-        hl.Name = "ToggleGlow"
         hl.Size = UDim2.new(0.6, 0, 0.6, 0)
         hl.Position = UDim2.new(0, 0, 0, 0)
         hl.BackgroundColor3 = Color3.fromRGB(255, 240, 255)
@@ -306,7 +286,6 @@ local function buildUI()
         hl.BorderSizePixel = 0
         hl.ZIndex = 2
         corner(hl, 999)
-
         local g = Instance.new("UIGradient", hl)
         g.Rotation = 135
         g.Transparency = NumberSequence.new{
@@ -314,29 +293,7 @@ local function buildUI()
             NumberSequenceKeypoint.new(0.6, 1.0),
             NumberSequenceKeypoint.new(1.0, 1.0),
         }
-        g.Color = ColorSequence.new(
-            Color3.fromRGB(255, 245, 255),
-            Color3.fromRGB(255, 255, 255)
-        )
         return hl
-    end
-
-    local function card(parent, size, pos)
-        local c = Instance.new("Frame")
-        c.Size = size
-        c.Position = pos
-        c.BackgroundColor3 = Config.CardMid
-        c.BorderSizePixel = 0
-        c.ZIndex = 3
-        c.Parent = parent
-        corner(c, 10)
-
-        local g = gradient(c, 90, {
-            ColorSequenceKeypoint.new(0.00, Config.CardTop),
-            ColorSequenceKeypoint.new(0.55, Config.CardMid),
-            ColorSequenceKeypoint.new(1.00, Config.CardBot),
-        })
-        return c
     end
 
     local function label(parent, text, size, pos, font, ts, color, align)
@@ -351,6 +308,23 @@ local function buildUI()
         l.TextXAlignment = align or Enum.TextXAlignment.Left
         l.ZIndex = 5
         return l
+    end
+
+    local function card(parent, size, pos)
+        local c = Instance.new("Frame")
+        c.Size = size
+        c.Position = pos
+        c.BackgroundColor3 = Config.CardMid
+        c.BorderSizePixel = 0
+        c.ZIndex = 3
+        c.Parent = parent
+        corner(c, 10)
+        gradient(c, 90, {
+            ColorSequenceKeypoint.new(0.00, Config.CardTop),
+            ColorSequenceKeypoint.new(0.55, Config.CardMid),
+            ColorSequenceKeypoint.new(1.00, Config.CardBot),
+        })
+        return c
     end
 
     local function makeToggle(parent, y, title, defaultOn, cb)
@@ -380,8 +354,7 @@ local function buildUI()
 
         local knob = Instance.new("Frame", pill)
         knob.Size = UDim2.new(0, 18, 0, 18)
-        knob.Position = defaultOn
-            and UDim2.new(1, -21, 0.5, -9)
+        knob.Position = defaultOn and UDim2.new(1, -21, 0.5, -9)
             or UDim2.new(0, 3, 0.5, -9)
         knob.BackgroundColor3 = Color3.new(1, 1, 1)
         knob.BorderSizePixel = 0
@@ -421,10 +394,8 @@ local function buildUI()
     miniBtn.Parent = gui
     corner(miniBtn, 12)
     gradient(miniBtn, 90, {Config.CardTop, Config.CardBot})
-
-    local mbIcon = label(miniBtn, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
+    label(miniBtn, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
         Config.FontBold, 22, Config.AccentLight, Enum.TextXAlignment.Center)
-    mbIcon.ZIndex = 3
 
     local win = Instance.new("Frame")
     win.Name = "Window"
@@ -456,9 +427,8 @@ local function buildUI()
     logoBox.Parent = sidebar
     corner(logoBox, 12)
     gradient(logoBox, 135, {Config.CardTop, Config.CardBot})
-
     label(logoBox, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
-        Config.FontBold, 22, Config.AccentLight, Enum.TextXAlignment.Center).ZIndex = 4
+        Config.FontBold, 22, Config.AccentLight, Enum.TextXAlignment.Center)
 
     label(sidebar, "AxionHub", UDim2.new(1, -20, 0, 18), UDim2.new(0, 18, 0, 70),
         Config.FontBold, 15, Config.Text)
@@ -503,19 +473,17 @@ local function buildUI()
         corner(badge, 8)
 
         label(badge, pageIcons[i], UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
-            Config.FontBold, 14, Config.AccentLight, Enum.TextXAlignment.Center).ZIndex = 5
+            Config.FontBold, 14, Config.AccentLight, Enum.TextXAlignment.Center)
 
         local nameLbl = label(btn, p:sub(1, 1) .. p:sub(2):lower(),
             UDim2.new(1, -50, 0, 14), UDim2.new(0, 44, 0, 7),
             Config.FontBold, 11.5, Config.TextDim)
-        nameLbl.ZIndex = 4
 
         local descLbl = label(btn, pageDesc[p],
             UDim2.new(1, -50, 0, 12), UDim2.new(0, 44, 0, 23),
             Config.Font, 9, Config.Muted)
-        descLbl.ZIndex = 4
 
-        pageBtns[p] = { btn = btn, glow = glow, name = nameLbl, icon = badge:FindFirstChildOfClass("TextLabel") }
+        pageBtns[p] = { btn = btn, glow = glow, name = nameLbl }
     end
 
     local content = Instance.new("Frame")
@@ -609,11 +577,6 @@ local function buildUI()
         UDim2.new(0.7, 0, 1, 0), UDim2.new(0, 0, 0, 0),
         Config.FontBold, 12, Config.Text)
 
-    local arInfo = label(autoRollRow, "click to start",
-        UDim2.new(0.7, 0, 1, 0), UDim2.new(0, 0, 0, 0),
-        Config.Font, 9, Config.AccentLight)
-    arInfo.Position = UDim2.new(0, 100, 0, 0)
-
     local arPill = Instance.new("TextButton", autoRollRow)
     arPill.Size = UDim2.new(0, 62, 0, 30)
     arPill.Position = UDim2.new(1, -62, 0.5, -15)
@@ -643,8 +606,6 @@ local function buildUI()
             Position = on and UDim2.new(1, -27, 0.5, -12)
                 or UDim2.new(0, 3, 0.5, -12),
         }):Play()
-        arInfo.Text = on and "rolling..." or "click to start"
-        arInfo.TextColor3 = on and Config.Good or Config.AccentLight
     end)
 
     local speedCard = card(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 192))
@@ -837,11 +798,16 @@ local function buildUI()
     closeBtn.Parent = topBtns
     corner(closeBtn, 999)
 
+    local blur = Instance.new("BlurEffect")
+    blur.Name = "AxionHubBlur_Internal"
+    blur.Size = 8
+    blur.Parent = Lighting
+
     minBtn.MouseButton1Click:Connect(function()
         State.minimized = true
         win.Visible = false
         miniBtn.Visible = true
-        if blur then blur.Size = 0 end
+        blur.Size = 0
     end)
 
     closeBtn.MouseButton1Click:Connect(function()
@@ -855,7 +821,11 @@ local function buildUI()
         State.minimized = false
         win.Visible = true
         miniBtn.Visible = false
-        if blur then blur.Size = 12 end
+        blur.Size = 8
+    end)
+
+    gui.Destroying:Connect(function()
+        pcall(function() blur:Destroy() end)
     end)
 
     local draggingWin = false
@@ -886,11 +856,16 @@ local function buildUI()
     end)
 
     applyPage()
+    return gui
 end
 
 local ok, err = pcall(buildUI)
 if not ok then
     warn("[AxionHub] buildUI ERROR:", err)
+    pcall(function()
+        local b = Lighting:FindFirstChild("AxionHubBlur_Internal")
+        if b then b:Destroy() end
+    end)
 end
 
 print("[AxionHub] " .. Config.Version .. " ready.")
