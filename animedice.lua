@@ -1,11 +1,11 @@
 --[[
-    AxionHub AutoDice v8
-    Changelog v7 → v8:
-      ✔ Content bg ดำขึ้น, Sidebar คงเดิม
-      ✔ Sidebar = Main + Settings (ย้ายโหมดไป Content)
-      ✔ ปุ่มย่อ/ปิดมุมขวาบน + mini mode
-      ✔ แก้บั๊ก blur ทับกล้องเกม (แยก ScreenGui blur ออกจากกล้อง)
-      ✔ เก็บเงิน AFK ทำงานปกติ
+    AxionHub AutoDice v9
+    Changelog v8 → v9:
+      ✔ Sidebar สว่างกว่า Content (แก้ดำกว่าผิด)
+      ✔ Main/Settings bg โปร่งใส + blur ชัดขึ้น
+      ✔ START/STOP → Toggle ติ๊กเดียว (ม่วงไล่เฉด ซ้ายดำ→ขวาหม่วง)
+      ✔ ปิด auto start ทั้ง Dice และ Collect
+      ✔ Toggle ทุกตัวเป็น gradient ม่วง
 --]]
 
 local Players           = game:GetService("Players")
@@ -19,27 +19,34 @@ local Workspace         = game:GetService("Workspace")
 local LP = Players.LocalPlayer
 local RS = ReplicatedStorage
 
-print("[AxionHub] ===== v8 starting =====")
+print("[AxionHub] ===== v9 starting =====")
 
 --=====================================================================
--- THEME :: PURPLE / BLACK
+-- THEME
 --=====================================================================
 local Theme = {
-    -- ★ Content bg — ดำขึ้น (เดิมม่วงเข้ม → ตอนนี้ดำ)
-    Bg1      = Color3.fromRGB(12,  3,  22),
-    Bg2      = Color3.fromRGB(5,   1,  10),
+    -- Content bg — ดำ
+    Bg1      = Color3.fromRGB(10,  2,  20),
+    Bg2      = Color3.fromRGB(4,   1,  9),
     Bg3      = Color3.fromRGB(0,   0,  0),
 
-    -- Card ม่วงไล่เฉด (คงเดิม)
+    -- Card ม่วง
     Card1    = Color3.fromRGB(78,  30, 130),
     Card2    = Color3.fromRGB(48,  16, 88),
     Card3    = Color3.fromRGB(24,  6,  48),
 
-    -- Sidebar (glass) คงดำเดิม
-    Sidebar  = Color3.fromRGB(24,  8,  46),
+    -- ★ Sidebar สว่างกว่า content (ม่วงเข้มขึ้น + โปร่งใสขึ้น)
+    Sidebar1 = Color3.fromRGB(58,  22, 100),
+    Sidebar2 = Color3.fromRGB(30,  10, 55),
 
-    Border   = Color3.fromRGB(90,  46, 152),
-    BorderLt = Color3.fromRGB(160, 88, 250),
+    -- Toggle gradient
+    TogOffL  = Color3.fromRGB(8,   2,  16),   -- ซ้ายดำ
+    TogOffR  = Color3.fromRGB(30,  10, 55),
+    TogOnL   = Color3.fromRGB(18,  4,  36),   -- ซ้ายดำ
+    TogOnR   = Color3.fromRGB(168, 85, 247),  -- ขวาหม่วง
+
+    Border   = Color3.fromRGB(120, 60, 200),
+    BorderLt = Color3.fromRGB(180, 110, 255),
 
     Accent   = Color3.fromRGB(168, 85, 247),
     Accent2  = Color3.fromRGB(124, 58, 237),
@@ -47,7 +54,7 @@ local Theme = {
 
     Text     = Color3.fromRGB(248, 244, 255),
     TextDim  = Color3.fromRGB(200, 180, 235),
-    Muted    = Color3.fromRGB(140, 118, 178),
+    Muted    = Color3.fromRGB(150, 128, 190),
 
     Good     = Color3.fromRGB(130, 255, 180),
     Bad      = Color3.fromRGB(255, 100, 130),
@@ -55,7 +62,7 @@ local Theme = {
 }
 
 --=====================================================================
--- SAFE PARENT / FIND
+-- SAFE
 --=====================================================================
 local function getSafeGuiParent()
     if type(gethui) == "function" then
@@ -92,7 +99,7 @@ local collectReady = CollectBalance ~= nil
 -- STATE
 --=====================================================================
 local State = {
-    page         = "MAIN",   -- "MAIN" | "SETTINGS"
+    page         = "MAIN",
     mode         = "AUTO",
     running      = false,
     rolls        = 0,
@@ -186,9 +193,6 @@ local function tickAntiFX()
             if c:IsA("GuiObject") and c.Visible then c.Visible = false end
         end
     end
-
-    -- ★ แก้บั๊ก: blur เราแยกชื่อไว้ ไม่แตะ blur ของกล้องเกม
-    -- ไม่ต้องแก้ blur ที่นี่แล้ว
 end
 
 initAntiFX()
@@ -269,7 +273,7 @@ local function collectOnePlot(plotNum)
 end
 
 local function collectLoop()
-    print("[AxionHub] 💰 AFK collect started")
+    print("[AxionHub] 💰 collect started")
     while State.autoCollect do
         for plotNum = State.plotMin, State.plotMax do
             if not State.autoCollect then break end
@@ -278,7 +282,7 @@ local function collectLoop()
         end
         task.wait(State.collectRate)
     end
-    print("[AxionHub] 💰 AFK collect stopped")
+    print("[AxionHub] 💰 collect stopped")
 end
 
 local function startCollect()
@@ -298,27 +302,12 @@ local function stopCollect()
     end
 end
 
--- Auto start
-task.spawn(function()
-    local tries = 0
-    while not CollectBalance and tries < 30 do
-        task.wait(0.5)
-        tries = tries + 1
-        CollectBalance = safeFind(RS, "Network", "PlotService", "RE", "CollectBalance")
-    end
-    if CollectBalance then
-        print("[AxionHub] ✔ AFK collect auto-starting")
-        startCollect()
-        if remotesReady then
-            task.wait(0.3)
-            start()
-            print("[AxionHub] ✔ Dice auto-starting")
-        end
-    end
-end)
+-- ★ ลบ Auto Start ทั้งหมด — ผู้ใช้ต้องติ๊กเอง
 
 LP.CharacterAdded:Connect(function()
     task.wait(2)
+    -- ถ้าเปิดอยู่แล้ว respawn กลับมา ก็เริ่มใหม่ (เฉพาะกรณีผู้ใช้เปิดอยู่)
+    if State.running and not State.running then end   -- no-op
     if State.collectStarted and not State.autoCollect then
         startCollect()
     end
@@ -342,17 +331,16 @@ local function buildUI()
     gui.DisplayOrder = 999
     gui.Parent = parent
 
-    -- ★ Blur ติดกับ ScreenGui (ไม่ทับกล้องเกม)
     local blur = Instance.new("BlurEffect")
-    blur.Name = "AxionHubBlur_Internal"   -- ★ ตั้งชื่อเฉพาะ
-    blur.Size = 12
+    blur.Name = "AxionHubBlur_Internal"
+    blur.Size = 18                    -- ★ เบลอกว่าเดิม
     blur.Parent = Lighting
     gui.Destroying:Connect(function()
         pcall(function() blur:Destroy() end)
     end)
 
     --=================================================================
-    -- MINI MODE BUTTON (โลโก้สี่เหลี่ยมมน)
+    -- MINI MODE
     --=================================================================
     local miniBtn = Instance.new("TextButton")
     miniBtn.Name = "MiniBtn"
@@ -365,7 +353,7 @@ local function buildUI()
     miniBtn.AutoButtonColor = false
     miniBtn.Visible = false
     miniBtn.Active = true
-    miniBtn.Draggable = true       -- ★ ลากได้
+    miniBtn.Draggable = true
     miniBtn.Parent = gui
     Instance.new("UICorner", miniBtn).CornerRadius = UDim.new(0, 12)
 
@@ -388,7 +376,7 @@ local function buildUI()
     mbIcon.Size = UDim2.new(1, 0, 1, 0)
 
     --=================================================================
-    -- MAIN WINDOW
+    -- WINDOW
     --=================================================================
     local win = Instance.new("Frame")
     win.Name = "Window"
@@ -402,7 +390,7 @@ local function buildUI()
     win.Parent = gui
     Instance.new("UICorner", win).CornerRadius = UDim.new(0, 16)
 
-    -- ★ Content bg ดำขึ้น
+    -- Content bg — ดำ (ชัด ไม่โปร่งแสง)
     local winGrad = Instance.new("UIGradient", win)
     winGrad.Rotation = 90
     winGrad.Color = ColorSequence.new{
@@ -411,9 +399,9 @@ local function buildUI()
         ColorSequenceKeypoint.new(1.00, Theme.Bg3),
     }
     winGrad.Transparency = NumberSequence.new{
-        NumberSequenceKeypoint.new(0.0, 0.0),
-        NumberSequenceKeypoint.new(0.5, 0.1),
-        NumberSequenceKeypoint.new(1.0, 0.15),
+        NumberSequenceKeypoint.new(0.0, 0.05),
+        NumberSequenceKeypoint.new(0.5, 0.15),
+        NumberSequenceKeypoint.new(1.0, 0.2),
     }
 
     local winStroke = Instance.new("UIStroke", win)
@@ -428,30 +416,27 @@ local function buildUI()
     }
 
     --=================================================================
-    -- SIDEBAR (Glass — คงดำเดิม)
+    -- SIDEBAR (★ สว่างกว่า content)
     --=================================================================
     local sidebar = Instance.new("Frame")
     sidebar.Size = UDim2.new(0, 155, 1, 0)
-    sidebar.BackgroundColor3 = Theme.Sidebar
-    sidebar.BackgroundTransparency = 0.25
+    sidebar.BackgroundColor3 = Theme.Sidebar1
+    sidebar.BackgroundTransparency = 0.15
     sidebar.BorderSizePixel = 0
     sidebar.Parent = win
     Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 16)
 
     local sbGrad = Instance.new("UIGradient", sidebar)
     sbGrad.Rotation = 90
-    sbGrad.Color = ColorSequence.new(
-        Color3.fromRGB(42, 14, 76),
-        Color3.fromRGB(6, 2, 14)
-    )
+    sbGrad.Color = ColorSequence.new(Theme.Sidebar1, Theme.Sidebar2)
     sbGrad.Transparency = NumberSequence.new{
-        NumberSequenceKeypoint.new(0, 0.1),
-        NumberSequenceKeypoint.new(1, 0.45),
+        NumberSequenceKeypoint.new(0, 0.05),
+        NumberSequenceKeypoint.new(1, 0.35),
     }
 
     local sbStroke = Instance.new("UIStroke", sidebar)
-    sbStroke.Thickness = 1.4
-    sbStroke.Transparency = 0.2
+    sbStroke.Thickness = 1.5
+    sbStroke.Transparency = 0.15
     local sbStrokeGrad = Instance.new("UIGradient", sbStroke)
     sbStrokeGrad.Rotation = 45
     sbStrokeGrad.Color = ColorSequence.new(Theme.AccentLt, Theme.Accent2)
@@ -459,8 +444,8 @@ local function buildUI()
     local sbHi = Instance.new("Frame", sidebar)
     sbHi.Size = UDim2.new(1, -2, 0, 1)
     sbHi.Position = UDim2.new(0, 1, 0, 1)
-    sbHi.BackgroundColor3 = Color3.fromRGB(220, 180, 255)
-    sbHi.BackgroundTransparency = 0.55
+    sbHi.BackgroundColor3 = Color3.fromRGB(230, 200, 255)
+    sbHi.BackgroundTransparency = 0.5
     sbHi.BorderSizePixel = 0
     Instance.new("UICorner", sbHi).CornerRadius = UDim.new(1, 0)
 
@@ -468,7 +453,7 @@ local function buildUI()
     sbLine.Size = UDim2.new(0, 1, 1, 0)
     sbLine.Position = UDim2.new(1, -1, 0, 0)
     sbLine.BackgroundColor3 = Theme.BorderLt
-    sbLine.BackgroundTransparency = 0.6
+    sbLine.BackgroundTransparency = 0.5
     sbLine.BorderSizePixel = 0
     sbLine.Parent = sidebar
 
@@ -476,7 +461,7 @@ local function buildUI()
     local logoBox = Instance.new("Frame")
     logoBox.Size = UDim2.new(0, 44, 0, 44)
     logoBox.Position = UDim2.new(0, 18, 0, 18)
-    logoBox.BackgroundColor3 = Theme.Card2
+    logoBox.BackgroundColor3 = Theme.Card1
     logoBox.BackgroundTransparency = 0.15
     logoBox.BorderSizePixel = 0
     logoBox.Parent = sidebar
@@ -510,7 +495,7 @@ local function buildUI()
     title.Parent = sidebar
 
     local sub = Instance.new("TextLabel")
-    sub.Text = "AutoDice  v8"
+    sub.Text = "AutoDice  v9"
     sub.Font = Enum.Font.Gotham
     sub.TextSize = 10
     sub.TextColor3 = Theme.Muted
@@ -523,22 +508,106 @@ local function buildUI()
     local divider = Instance.new("Frame")
     divider.Size = UDim2.new(1, -32, 0, 1)
     divider.Position = UDim2.new(0, 16, 0, 118)
-    divider.BackgroundColor3 = Theme.Border
-    divider.BackgroundTransparency = 0.5
+    divider.BackgroundColor3 = Theme.BorderLt
+    divider.BackgroundTransparency = 0.45
     divider.BorderSizePixel = 0
     divider.Parent = sidebar
 
     --=================================================================
-    -- CONTENT CONTAINER
+    -- TOGGLE BUILDER (ม่วงไล่เฉด ซ้ายดำ → ขวาหม่วง)
     --=================================================================
-    local content = Instance.new("Frame")
-    content.Size = UDim2.new(1, -155, 1, 0)
-    content.Position = UDim2.new(0, 155, 0, 0)
-    content.BackgroundTransparency = 1
-    content.Parent = win
+    local function makeToggle(parent, y, label, defaultOn, cb, tintColor, sizeW, sizeH, posX)
+        tintColor = tintColor or Theme.Accent
+        sizeW = sizeW or 44
+        sizeH = sizeH or 22
+        posX = posX or UDim2.new(1, -58, 0, y)
+
+        local lbl = Instance.new("TextLabel", parent)
+        lbl.Text = label
+        lbl.Font = Enum.Font.GothamMedium
+        lbl.TextSize = 11.5
+        lbl.TextColor3 = Theme.Text
+        lbl.BackgroundTransparency = 1
+        lbl.Size = UDim2.new(0.75, 0, 0, 20)
+        lbl.Position = UDim2.new(0, 14, 0, y)
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        local pill = Instance.new("TextButton", parent)
+        pill.Size = UDim2.new(0, sizeW, 0, sizeH)
+        pill.Position = posX
+        pill.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
+        pill.Text = ""
+        pill.AutoButtonColor = false
+        Instance.new("UICorner", pill).CornerRadius = UDim.new(1, 0)
+
+        -- ★ Gradient ม่วง ไล่เฉด
+        local grad = Instance.new("UIGradient", pill)
+        grad.Rotation = 0     -- ซ้าย → ขวา
+        grad.Color = defaultOn and ColorSequence.new{
+            ColorSequenceKeypoint.new(0.0, Theme.TogOnL),
+            ColorSequenceKeypoint.new(1.0, Theme.TogOnR),
+        } or ColorSequence.new{
+            ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
+            ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
+        }
+
+        local pillStroke = Instance.new("UIStroke", pill)
+        pillStroke.Thickness = 1
+        pillStroke.Transparency = defaultOn and 0.2 or 0.6
+        pillStroke.Color = defaultOn and Theme.AccentLt or Color3.fromRGB(60, 30, 100)
+
+        local k = Instance.new("Frame", pill)
+        k.Size = UDim2.new(0, sizeH - 6, 0, sizeH - 6)
+        k.Position = defaultOn and UDim2.new(1, -(sizeH-3), 0.5, -(sizeH-6)/2) or UDim2.new(0, 3, 0.5, -(sizeH-6)/2)
+        k.BackgroundColor3 = Color3.new(1,1,1)
+        k.BorderSizePixel = 0
+        Instance.new("UICorner", k).CornerRadius = UDim.new(1, 0)
+
+        local kStroke = Instance.new("UIStroke", k)
+        kStroke.Thickness = 1
+        kStroke.Transparency = 0.4
+        kStroke.Color = Color3.fromRGB(255, 220, 255)
+
+        local on = defaultOn
+        local function update()
+            TweenService:Create(pill, TweenInfo.new(0.22), {
+                BackgroundColor3 = on and Theme.Accent or Color3.fromRGB(10, 3, 20)
+            }):Play()
+            TweenService:Create(pill, TweenInfo.new(0.22), {
+                BackgroundTransparency = on and 0.35 or 0.0
+            }):Play()
+            TweenService:Create(grad, TweenInfo.new(0.22), {}):Play()
+            grad.Color = on and ColorSequence.new{
+                ColorSequenceKeypoint.new(0.0, Theme.TogOnL),
+                ColorSequenceKeypoint.new(1.0, Theme.TogOnR),
+            } or ColorSequence.new{
+                ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
+                ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
+            }
+            TweenService:Create(pillStroke, TweenInfo.new(0.22), {
+                Transparency = on and 0.2 or 0.6,
+                Color = on and Theme.AccentLt or Color3.fromRGB(60, 30, 100),
+            }):Play()
+            TweenService:Create(k, TweenInfo.new(0.22), {
+                Position = on and UDim2.new(1, -(sizeH-3), 0.5, -(sizeH-6)/2)
+                            or UDim2.new(0, 3, 0.5, -(sizeH-6)/2)
+            }):Play()
+        end
+
+        pill.MouseButton1Click:Connect(function()
+            on = not on
+            update()
+            if cb then cb(on) end
+        end)
+
+        return { Set = function(v)
+            on = v
+            update()
+        end }
+    end
 
     --=================================================================
-    -- ★ SIDEBAR MENU: Main + Settings
+    -- SIDEBAR MENU: Main / Settings
     --=================================================================
     local pages = { "MAIN", "SETTINGS" }
     local pageIcons = { "🏠", "⚙" }
@@ -554,7 +623,7 @@ local function buildUI()
         btn.Size = UDim2.new(1, -24, 0, 44)
         btn.Position = UDim2.new(0, 12, 0, yBase + (i-1) * 50)
         btn.BackgroundColor3 = Theme.Card2
-        btn.BackgroundTransparency = 0.8
+        btn.BackgroundTransparency = 0.7
         btn.BorderSizePixel = 0
         btn.Text = ""
         btn.AutoButtonColor = false
@@ -611,24 +680,16 @@ local function buildUI()
         descLbl.TextXAlignment = Enum.TextXAlignment.Left
 
         pageBtns[p] = { btn=btn, stroke=bStroke, glow=glow, name=nameLbl, icon=icon }
-
-        btn.MouseEnter:Connect(function()
-            if State.page ~= p then
-                TweenService:Create(btn, TweenInfo.new(0.15), { BackgroundTransparency = 0.55 }):Play()
-                TweenService:Create(nameLbl, TweenInfo.new(0.15), { TextColor3 = Theme.Text }):Play()
-            end
-        end)
-        btn.MouseLeave:Connect(function()
-            if State.page ~= p then
-                TweenService:Create(btn, TweenInfo.new(0.15), { BackgroundTransparency = 0.8 }):Play()
-                TweenService:Create(nameLbl, TweenInfo.new(0.15), { TextColor3 = Theme.TextDim }):Play()
-            end
-        end)
-
-        btn.MouseButton1Click:Connect(function()
-            State.page = p
-        end)
     end
+
+    --=================================================================
+    -- CONTENT CONTAINER
+    --=================================================================
+    local content = Instance.new("Frame")
+    content.Size = UDim2.new(1, -155, 1, 0)
+    content.Position = UDim2.new(0, 155, 0, 0)
+    content.BackgroundTransparency = 1
+    content.Parent = win
 
     --=================================================================
     -- MAIN PAGE
@@ -638,33 +699,29 @@ local function buildUI()
     mainPage.BackgroundTransparency = 1
     mainPage.Parent = content
 
-    -- Main page: header card
+    -- Main bg — ★ โปร่งใส + เบลอ (blur effect เห็นชัด)
+    local mainBg = Instance.new("Frame")
+    mainBg.Size = UDim2.new(1, 0, 1, 0)
+    mainBg.BackgroundColor3 = Color3.fromRGB(6, 2, 14)
+    mainBg.BackgroundTransparency = 0.55      -- ★ โปร่งใส
+    mainBg.BorderSizePixel = 0
+    mainBg.ZIndex = 0
+    mainBg.Parent = mainPage
+
+    -- Header
     local header = Instance.new("Frame")
     header.Size = UDim2.new(1, -36, 0, 46)
     header.Position = UDim2.new(0, 18, 0, 16)
-    header.BackgroundColor3 = Theme.Card2
-    header.BackgroundTransparency = 0.15
+    header.BackgroundColor3 = Color3.fromRGB(24, 8, 46)
+    header.BackgroundTransparency = 0.5      -- ★ โปร่งใส
     header.BorderSizePixel = 0
     header.Parent = mainPage
     Instance.new("UICorner", header).CornerRadius = UDim.new(0, 10)
 
-    local hGrad = Instance.new("UIGradient", header)
-    hGrad.Rotation = 90
-    hGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.00, Theme.Card1),
-        ColorSequenceKeypoint.new(0.55, Theme.Card2),
-        ColorSequenceKeypoint.new(1.00, Theme.Card3),
-    }
-    hGrad.Transparency = NumberSequence.new{
-        NumberSequenceKeypoint.new(0.0, 0.1),
-        NumberSequenceKeypoint.new(1.0, 0.35),
-    }
-
     local hStroke = Instance.new("UIStroke", header)
     hStroke.Thickness = 1
-    hStroke.Transparency = 0.35
-    local hSG = Instance.new("UIGradient", hStroke)
-    hSG.Color = ColorSequence.new(Theme.BorderLt, Theme.Accent2)
+    hStroke.Transparency = 0.4
+    hStroke.Color = Theme.BorderLt
 
     local dot = Instance.new("Frame", header)
     dot.Size = UDim2.new(0, 8, 0, 8)
@@ -686,42 +743,29 @@ local function buildUI()
     task.spawn(function()
         while statusTxt.Parent do
             local ready = remotesReady
-            local stat = ready and (State.running and "RUNNING" or "READY") or "NO REMOTES"
-            local color = ready and (State.running and Theme.Good or Theme.AccentLt) or Theme.Bad
-            statusTxt.Text = string.format("💤 AFK · %s · rolls: %d · 💰 %d",
+            local stat = ready and (State.running and "RUNNING" or "IDLE") or "NO REMOTES"
+            local color = ready and (State.running and Theme.Good or Theme.Muted) or Theme.Bad
+            statusTxt.Text = string.format("💤 · %s · rolls: %d · 💰 %d",
                 stat, State.rolls, State.collected)
             dot.BackgroundColor3 = color
             task.wait(0.2)
         end
     end)
 
-    -- ★ โหมดเลือก Dice (ย้ายมา Main)
+    -- Mode card
     local modeCard = Instance.new("Frame")
     modeCard.Size = UDim2.new(1, -36, 0, 76)
     modeCard.Position = UDim2.new(0, 18, 0, 76)
-    modeCard.BackgroundColor3 = Theme.Card2
-    modeCard.BackgroundTransparency = 0.15
+    modeCard.BackgroundColor3 = Color3.fromRGB(24, 8, 46)
+    modeCard.BackgroundTransparency = 0.5
     modeCard.BorderSizePixel = 0
     modeCard.Parent = mainPage
     Instance.new("UICorner", modeCard).CornerRadius = UDim.new(0, 10)
 
-    local mcGrad = Instance.new("UIGradient", modeCard)
-    mcGrad.Rotation = 90
-    mcGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.00, Theme.Card1),
-        ColorSequenceKeypoint.new(0.55, Theme.Card2),
-        ColorSequenceKeypoint.new(1.00, Theme.Card3),
-    }
-    mcGrad.Transparency = NumberSequence.new{
-        NumberSequenceKeypoint.new(0.0, 0.1),
-        NumberSequenceKeypoint.new(1.0, 0.35),
-    }
-
     local mcStroke = Instance.new("UIStroke", modeCard)
     mcStroke.Thickness = 1
-    mcStroke.Transparency = 0.35
-    local mcSG = Instance.new("UIGradient", mcStroke)
-    mcSG.Color = ColorSequence.new(Theme.BorderLt, Theme.Accent2)
+    mcStroke.Transparency = 0.4
+    mcStroke.Color = Theme.BorderLt
 
     local mcLbl = Instance.new("TextLabel", modeCard)
     mcLbl.Text = "MODE"
@@ -781,29 +825,16 @@ local function buildUI()
     local speedCard = Instance.new("Frame")
     speedCard.Size = UDim2.new(1, -36, 0, 62)
     speedCard.Position = UDim2.new(0, 18, 0, 162)
-    speedCard.BackgroundColor3 = Theme.Card2
-    speedCard.BackgroundTransparency = 0.15
+    speedCard.BackgroundColor3 = Color3.fromRGB(24, 8, 46)
+    speedCard.BackgroundTransparency = 0.5
     speedCard.BorderSizePixel = 0
     speedCard.Parent = mainPage
     Instance.new("UICorner", speedCard).CornerRadius = UDim.new(0, 10)
 
-    local scGrad = Instance.new("UIGradient", speedCard)
-    scGrad.Rotation = 90
-    scGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.00, Theme.Card1),
-        ColorSequenceKeypoint.new(0.55, Theme.Card2),
-        ColorSequenceKeypoint.new(1.00, Theme.Card3),
-    }
-    scGrad.Transparency = NumberSequence.new{
-        NumberSequenceKeypoint.new(0.0, 0.1),
-        NumberSequenceKeypoint.new(1.0, 0.35),
-    }
-
     local scStroke = Instance.new("UIStroke", speedCard)
     scStroke.Thickness = 1
-    scStroke.Transparency = 0.35
-    local scSG = Instance.new("UIGradient", scStroke)
-    scSG.Color = ColorSequence.new(Theme.BorderLt, Theme.Accent2)
+    scStroke.Transparency = 0.4
+    scStroke.Color = Theme.BorderLt
 
     local spdLbl = Instance.new("TextLabel", speedCard)
     spdLbl.Text = "SPAM SPEED"
@@ -828,7 +859,7 @@ local function buildUI()
     local track = Instance.new("TextButton", speedCard)
     track.Size = UDim2.new(1, -24, 0, 10)
     track.Position = UDim2.new(0, 12, 0, 36)
-    track.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
+    track.BackgroundColor3 = Color3.fromRGB(6, 2, 12)
     track.BorderSizePixel = 0
     track.Text = ""
     track.AutoButtonColor = false
@@ -882,35 +913,21 @@ local function buildUI()
         end
     end)
 
-    -- Collect card (ย้ายมา Main ด้วย — เพื่อให้กด toggle ได้ทันที)
+    -- AFK Collect card (toggle)
     local collectCard = Instance.new("Frame")
     collectCard.Size = UDim2.new(1, -36, 0, 62)
     collectCard.Position = UDim2.new(0, 18, 0, 232)
-    collectCard.BackgroundColor3 = Theme.Card2
-    collectCard.BackgroundTransparency = 0.15
+    collectCard.BackgroundColor3 = Color3.fromRGB(24, 8, 46)
+    collectCard.BackgroundTransparency = 0.5
     collectCard.BorderSizePixel = 0
     collectCard.Parent = mainPage
     Instance.new("UICorner", collectCard).CornerRadius = UDim.new(0, 10)
 
-    local ccGrad = Instance.new("UIGradient", collectCard)
-    ccGrad.Rotation = 90
-    ccGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.00, Theme.Card1),
-        ColorSequenceKeypoint.new(0.55, Theme.Card2),
-        ColorSequenceKeypoint.new(1.00, Theme.Card3),
-    }
-    ccGrad.Transparency = NumberSequence.new{
-        NumberSequenceKeypoint.new(0.0, 0.1),
-        NumberSequenceKeypoint.new(1.0, 0.35),
-    }
-
     local ccStroke = Instance.new("UIStroke", collectCard)
     ccStroke.Thickness = 1
-    ccStroke.Transparency = 0.35
-    local ccSG = Instance.new("UIGradient", ccStroke)
-    ccSG.Color = ColorSequence.new(Theme.BorderLt, Theme.Accent2)
+    ccStroke.Transparency = 0.4
+    ccStroke.Color = Theme.BorderLt
 
-    -- Auto collect toggle
     local acLbl = Instance.new("TextLabel", collectCard)
     acLbl.Text = "💰 AFK Collect Money"
     acLbl.Font = Enum.Font.GothamMedium
@@ -921,20 +938,38 @@ local function buildUI()
     acLbl.Position = UDim2.new(0, 14, 0, 8)
     acLbl.TextXAlignment = Enum.TextXAlignment.Left
 
+    -- ★ Auto Collect toggle (ม่วงไล่เฉด)
     local acPill = Instance.new("TextButton", collectCard)
-    acPill.Size = UDim2.new(0, 36, 0, 20)
-    acPill.Position = UDim2.new(1, -50, 0, 8)
-    acPill.BackgroundColor3 = State.autoCollect and Theme.Gold or Color3.fromRGB(10, 3, 20)
+    acPill.Size = UDim2.new(0, 44, 0, 22)
+    acPill.Position = UDim2.new(1, -58, 0, 8)
+    acPill.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
     acPill.Text = ""
     acPill.AutoButtonColor = false
     Instance.new("UICorner", acPill).CornerRadius = UDim.new(1, 0)
 
+    local acGrad = Instance.new("UIGradient", acPill)
+    acGrad.Rotation = 0
+    acGrad.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
+        ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
+    }
+
+    local acStroke = Instance.new("UIStroke", acPill)
+    acStroke.Thickness = 1
+    acStroke.Transparency = 0.6
+    acStroke.Color = Color3.fromRGB(60, 30, 100)
+
     local acK = Instance.new("Frame", acPill)
-    acK.Size = UDim2.new(0, 14, 0, 14)
-    acK.Position = State.autoCollect and UDim2.new(1, -17, 0.5, -7) or UDim2.new(0, 3, 0.5, -7)
+    acK.Size = UDim2.new(0, 16, 0, 16)
+    acK.Position = UDim2.new(0, 3, 0.5, -8)
     acK.BackgroundColor3 = Color3.new(1,1,1)
     acK.BorderSizePixel = 0
     Instance.new("UICorner", acK).CornerRadius = UDim.new(1, 0)
+
+    local acKStroke = Instance.new("UIStroke", acK)
+    acKStroke.Thickness = 1
+    acKStroke.Transparency = 0.4
+    acKStroke.Color = Color3.fromRGB(255, 220, 255)
 
     acPill.MouseButton1Click:Connect(function()
         if State.autoCollect then
@@ -942,16 +977,29 @@ local function buildUI()
         else
             startCollect()
         end
-        TweenService:Create(acPill, TweenInfo.new(0.2), {
-            BackgroundColor3 = State.autoCollect and Theme.Gold or Color3.fromRGB(10, 3, 20)
+        local on = State.autoCollect
+
+        acGrad.Color = on and ColorSequence.new{
+            ColorSequenceKeypoint.new(0.0, Theme.TogOnL),
+            ColorSequenceKeypoint.new(1.0, Theme.TogOnR),
+        } or ColorSequence.new{
+            ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
+            ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
+        }
+        TweenService:Create(acPill, TweenInfo.new(0.22), {
+            BackgroundColor3 = on and Theme.Accent or Color3.fromRGB(10, 3, 20),
         }):Play()
-        TweenService:Create(acK, TweenInfo.new(0.2), {
-            Position = State.autoCollect and UDim2.new(1,-17,0.5,-7) or UDim2.new(0,3,0.5,-7)
+        TweenService:Create(acStroke, TweenInfo.new(0.22), {
+            Transparency = on and 0.2 or 0.6,
+            Color = on and Theme.AccentLt or Color3.fromRGB(60, 30, 100),
+        }):Play()
+        TweenService:Create(acK, TweenInfo.new(0.22), {
+            Position = on and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8),
         }):Play()
     end)
 
     local acInfo = Instance.new("TextLabel", collectCard)
-    acInfo.Text = string.format("AFK mode · every %.1fs · plot %d→%d",
+    acInfo.Text = string.format("every %.1fs · plot %d→%d",
         State.collectRate, State.plotMin, State.plotMax)
     acInfo.Font = Enum.Font.Gotham
     acInfo.TextSize = 9
@@ -962,63 +1010,102 @@ local function buildUI()
     acInfo.TextXAlignment = Enum.TextXAlignment.Left
 
     --=================================================================
-    -- START / STOP (อยู่ Main)
+    -- ★ TOGGLE AUTO ROLL (แทนปุ่ม START/STOP)
     --=================================================================
-    local startBtn = Instance.new("TextButton")
-    startBtn.Size = UDim2.new(0.5, -26, 0, 42)
-    startBtn.Position = UDim2.new(0, 18, 1, -58)
-    startBtn.BorderSizePixel = 0
-    startBtn.Text = "▶  START DICE"
-    startBtn.Font = Enum.Font.GothamBold
-    startBtn.TextSize = 13
-    startBtn.TextColor3 = Theme.Text
-    startBtn.AutoButtonColor = false
-    startBtn.Parent = mainPage
-    Instance.new("UICorner", startBtn).CornerRadius = UDim.new(0, 10)
+    local autoRollCard = Instance.new("Frame")
+    autoRollCard.Size = UDim2.new(1, -36, 0, 62)
+    autoRollCard.Position = UDim2.new(0, 18, 1, -76)
+    autoRollCard.BackgroundColor3 = Color3.fromRGB(24, 8, 46)
+    autoRollCard.BackgroundTransparency = 0.5
+    autoRollCard.BorderSizePixel = 0
+    autoRollCard.Parent = mainPage
+    Instance.new("UICorner", autoRollCard).CornerRadius = UDim.new(0, 10)
 
-    local sbG = Instance.new("UIGradient", startBtn)
-    sbG.Rotation = 90
-    sbG.Color = ColorSequence.new(Theme.Accent2, Theme.Accent)
+    local arStroke = Instance.new("UIStroke", autoRollCard)
+    arStroke.Thickness = 1
+    arStroke.Transparency = 0.4
+    arStroke.Color = Theme.BorderLt
 
-    local sbSt = Instance.new("UIStroke", startBtn)
-    sbSt.Color = Theme.AccentLt
-    sbSt.Thickness = 1
-    sbSt.Transparency = 0.3
+    local arLbl = Instance.new("TextLabel", autoRollCard)
+    arLbl.Text = "🎲 Auto Roll"
+    arLbl.Font = Enum.Font.GothamBold
+    arLbl.TextSize = 13
+    arLbl.TextColor3 = Theme.Text
+    arLbl.BackgroundTransparency = 1
+    arLbl.Size = UDim2.new(0.75, 0, 0, 20)
+    arLbl.Position = UDim2.new(0, 14, 0, 10)
+    arLbl.TextXAlignment = Enum.TextXAlignment.Left
 
-    local stopBtn = Instance.new("TextButton")
-    stopBtn.Size = UDim2.new(0.5, -26, 0, 42)
-    stopBtn.Position = UDim2.new(0.5, 8, 1, -58)
-    stopBtn.BorderSizePixel = 0
-    stopBtn.Text = "■  STOP"
-    stopBtn.Font = Enum.Font.GothamBold
-    stopBtn.TextSize = 13
-    stopBtn.TextColor3 = Theme.Text
-    stopBtn.AutoButtonColor = false
-    stopBtn.Parent = mainPage
-    Instance.new("UICorner", stopBtn).CornerRadius = UDim.new(0, 10)
+    local arInfo = Instance.new("TextLabel", autoRollCard)
+    arInfo.Text = "click to start rolling"
+    arInfo.Font = Enum.Font.Gotham
+    arInfo.TextSize = 9.5
+    arInfo.TextColor3 = Theme.AccentLt
+    arInfo.BackgroundTransparency = 1
+    arInfo.Size = UDim2.new(1, -28, 0, 14)
+    arInfo.Position = UDim2.new(0, 14, 0, 34)
+    arInfo.TextXAlignment = Enum.TextXAlignment.Left
 
-    local stopGrad = Instance.new("UIGradient", stopBtn)
-    stopGrad.Rotation = 90
-    stopGrad.Color = ColorSequence.new(
-        Color3.fromRGB(60, 20, 40),
-        Color3.fromRGB(30, 8, 20)
-    )
+    -- Toggle ใหญ่ ม่วงไล่เฉด
+    local arPill = Instance.new("TextButton", autoRollCard)
+    arPill.Size = UDim2.new(0, 60, 0, 30)
+    arPill.Position = UDim2.new(1, -74, 0.5, -15)
+    arPill.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
+    arPill.Text = ""
+    arPill.AutoButtonColor = false
+    Instance.new("UICorner", arPill).CornerRadius = UDim.new(1, 0)
 
-    local sbSt2 = Instance.new("UIStroke", stopBtn)
-    sbSt2.Color = Color3.fromRGB(180, 60, 90)
-    sbSt2.Thickness = 1
-    sbSt2.Transparency = 0.5
+    local arGrad = Instance.new("UIGradient", arPill)
+    arGrad.Rotation = 0
+    arGrad.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
+        ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
+    }
 
-    startBtn.MouseButton1Click:Connect(function()
-        if not remotesReady then return end
-        start()
-        startBtn.Text = "▶  RUNNING"
-        startBtn.TextColor3 = Theme.Good
-    end)
-    stopBtn.MouseButton1Click:Connect(function()
-        stop()
-        startBtn.Text = "▶  START DICE"
-        startBtn.TextColor3 = Theme.Text
+    local arStrokeUI = Instance.new("UIStroke", arPill)
+    arStrokeUI.Thickness = 1.2
+    arStrokeUI.Transparency = 0.6
+    arStrokeUI.Color = Color3.fromRGB(60, 30, 100)
+
+    local arK = Instance.new("Frame", arPill)
+    arK.Size = UDim2.new(0, 24, 0, 24)
+    arK.Position = UDim2.new(0, 3, 0.5, -12)
+    arK.BackgroundColor3 = Color3.new(1,1,1)
+    arK.BorderSizePixel = 0
+    Instance.new("UICorner", arK).CornerRadius = UDim.new(1, 0)
+
+    local arKStroke = Instance.new("UIStroke", arK)
+    arKStroke.Thickness = 1
+    arKStroke.Transparency = 0.4
+    arKStroke.Color = Color3.fromRGB(255, 220, 255)
+
+    arPill.MouseButton1Click:Connect(function()
+        if State.running then
+            stop()
+        else
+            start()
+        end
+        local on = State.running
+
+        arGrad.Color = on and ColorSequence.new{
+            ColorSequenceKeypoint.new(0.0, Theme.TogOnL),
+            ColorSequenceKeypoint.new(1.0, Theme.TogOnR),
+        } or ColorSequence.new{
+            ColorSequenceKeypoint.new(0.0, Theme.TogOffL),
+            ColorSequenceKeypoint.new(1.0, Theme.TogOffR),
+        }
+        TweenService:Create(arPill, TweenInfo.new(0.25), {
+            BackgroundColor3 = on and Theme.Accent or Color3.fromRGB(10, 3, 20),
+        }):Play()
+        TweenService:Create(arStrokeUI, TweenInfo.new(0.25), {
+            Transparency = on and 0.2 or 0.6,
+            Color = on and Theme.AccentLt or Color3.fromRGB(60, 30, 100),
+        }):Play()
+        TweenService:Create(arK, TweenInfo.new(0.25), {
+            Position = on and UDim2.new(1, -27, 0.5, -12) or UDim2.new(0, 3, 0.5, -12),
+        }):Play()
+        arInfo.Text = on and "rolling..." or "click to start rolling"
+        arInfo.TextColor3 = on and Theme.Good or Theme.AccentLt
     end)
 
     --=================================================================
@@ -1030,33 +1117,28 @@ local function buildUI()
     settingsPage.Visible = false
     settingsPage.Parent = content
 
+    local setBg = Instance.new("Frame")
+    setBg.Size = UDim2.new(1, 0, 1, 0)
+    setBg.BackgroundColor3 = Color3.fromRGB(6, 2, 14)
+    setBg.BackgroundTransparency = 0.55
+    setBg.BorderSizePixel = 0
+    setBg.ZIndex = 0
+    setBg.Parent = settingsPage
+
     -- Settings header
     local sHeader = Instance.new("Frame")
     sHeader.Size = UDim2.new(1, -36, 0, 46)
     sHeader.Position = UDim2.new(0, 18, 0, 16)
-    sHeader.BackgroundColor3 = Theme.Card2
-    sHeader.BackgroundTransparency = 0.15
+    sHeader.BackgroundColor3 = Color3.fromRGB(24, 8, 46)
+    sHeader.BackgroundTransparency = 0.5
     sHeader.BorderSizePixel = 0
     sHeader.Parent = settingsPage
     Instance.new("UICorner", sHeader).CornerRadius = UDim.new(0, 10)
 
-    local shGrad = Instance.new("UIGradient", sHeader)
-    shGrad.Rotation = 90
-    shGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.00, Theme.Card1),
-        ColorSequenceKeypoint.new(0.55, Theme.Card2),
-        ColorSequenceKeypoint.new(1.00, Theme.Card3),
-    }
-    shGrad.Transparency = NumberSequence.new{
-        NumberSequenceKeypoint.new(0.0, 0.1),
-        NumberSequenceKeypoint.new(1.0, 0.35),
-    }
-
     local shStroke = Instance.new("UIStroke", sHeader)
     shStroke.Thickness = 1
-    shStroke.Transparency = 0.35
-    local shSG = Instance.new("UIGradient", shStroke)
-    shSG.Color = ColorSequence.new(Theme.BorderLt, Theme.Accent2)
+    shStroke.Transparency = 0.4
+    shStroke.Color = Theme.BorderLt
 
     local sTitle = Instance.new("TextLabel", sHeader)
     sTitle.Text = "⚙  Settings"
@@ -1068,116 +1150,43 @@ local function buildUI()
     sTitle.Position = UDim2.new(0, 16, 0, 0)
     sTitle.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- Settings card: animation toggles
+    -- Animation toggles
     local setCard = Instance.new("Frame")
-    setCard.Size = UDim2.new(1, -36, 0, 88)
+    setCard.Size = UDim2.new(1, -36, 0, 90)
     setCard.Position = UDim2.new(0, 18, 0, 76)
-    setCard.BackgroundColor3 = Theme.Card2
-    setCard.BackgroundTransparency = 0.15
+    setCard.BackgroundColor3 = Color3.fromRGB(24, 8, 46)
+    setCard.BackgroundTransparency = 0.5
     setCard.BorderSizePixel = 0
     setCard.Parent = settingsPage
     Instance.new("UICorner", setCard).CornerRadius = UDim.new(0, 10)
 
-    local setCGrad = Instance.new("UIGradient", setCard)
-    setCGrad.Rotation = 90
-    setCGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.00, Theme.Card1),
-        ColorSequenceKeypoint.new(0.55, Theme.Card2),
-        ColorSequenceKeypoint.new(1.00, Theme.Card3),
-    }
-    setCGrad.Transparency = NumberSequence.new{
-        NumberSequenceKeypoint.new(0.0, 0.1),
-        NumberSequenceKeypoint.new(1.0, 0.35),
-    }
-
     local setCStroke = Instance.new("UIStroke", setCard)
     setCStroke.Thickness = 1
-    setCStroke.Transparency = 0.35
-    local setSG = Instance.new("UIGradient", setCStroke)
-    setSG.Color = ColorSequence.new(Theme.BorderLt, Theme.Accent2)
+    setCStroke.Transparency = 0.4
+    setCStroke.Color = Theme.BorderLt
 
-    local function makeToggle(parent, y, label, defaultOn, cb, tintColor)
-        tintColor = tintColor or Theme.Accent
-
-        local lbl = Instance.new("TextLabel", parent)
-        lbl.Text = label
-        lbl.Font = Enum.Font.GothamMedium
-        lbl.TextSize = 11
-        lbl.TextColor3 = Theme.Text
-        lbl.BackgroundTransparency = 1
-        lbl.Size = UDim2.new(0.75, 0, 0, 20)
-        lbl.Position = UDim2.new(0, 14, 0, y)
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-
-        local pill = Instance.new("TextButton", parent)
-        pill.Size = UDim2.new(0, 36, 0, 20)
-        pill.Position = UDim2.new(1, -50, 0, y)
-        pill.BackgroundColor3 = defaultOn and tintColor or Color3.fromRGB(10, 3, 20)
-        pill.Text = ""
-        pill.AutoButtonColor = false
-        Instance.new("UICorner", pill).CornerRadius = UDim.new(1, 0)
-
-        local k = Instance.new("Frame", pill)
-        k.Size = UDim2.new(0, 14, 0, 14)
-        k.Position = defaultOn and UDim2.new(1, -17, 0.5, -7) or UDim2.new(0, 3, 0.5, -7)
-        k.BackgroundColor3 = Color3.new(1,1,1)
-        k.BorderSizePixel = 0
-        Instance.new("UICorner", k).CornerRadius = UDim.new(1, 0)
-
-        local on = defaultOn
-        local function update()
-            TweenService:Create(pill, TweenInfo.new(0.2), {
-                BackgroundColor3 = on and tintColor or Color3.fromRGB(10, 3, 20)
-            }):Play()
-            TweenService:Create(k, TweenInfo.new(0.2), {
-                Position = on and UDim2.new(1,-17,0.5,-7) or UDim2.new(0,3,0.5,-7)
-            }):Play()
-        end
-
-        pill.MouseButton1Click:Connect(function()
-            on = not on
-            update()
-            if cb then cb(on) end
-        end)
-
-        return { Set = function(v) on = v; update() end }
-    end
-
-    makeToggle(setCard, 10, "Bypass Roll Animation",
+    makeToggle(setCard, 12, "Bypass Roll Animation",
         State.bypassAnim,
         function(v) State.bypassAnim = v end)
 
-    makeToggle(setCard, 42, "Kill Camera Cutscene",
+    makeToggle(setCard, 46, "Kill Camera Cutscene",
         State.killCutscene,
         function(v) State.killCutscene = v end)
 
     -- Plot range
     local rangeCard = Instance.new("Frame")
     rangeCard.Size = UDim2.new(1, -36, 0, 76)
-    rangeCard.Position = UDim2.new(0, 18, 0, 176)
-    rangeCard.BackgroundColor3 = Theme.Card2
-    rangeCard.BackgroundTransparency = 0.15
+    rangeCard.Position = UDim2.new(0, 18, 0, 178)
+    rangeCard.BackgroundColor3 = Color3.fromRGB(24, 8, 46)
+    rangeCard.BackgroundTransparency = 0.5
     rangeCard.BorderSizePixel = 0
     rangeCard.Parent = settingsPage
     Instance.new("UICorner", rangeCard).CornerRadius = UDim.new(0, 10)
 
-    local rcGrad = Instance.new("UIGradient", rangeCard)
-    rcGrad.Rotation = 90
-    rcGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.00, Theme.Card1),
-        ColorSequenceKeypoint.new(0.55, Theme.Card2),
-        ColorSequenceKeypoint.new(1.00, Theme.Card3),
-    }
-    rcGrad.Transparency = NumberSequence.new{
-        NumberSequenceKeypoint.new(0.0, 0.1),
-        NumberSequenceKeypoint.new(1.0, 0.35),
-    }
-
     local rcStroke = Instance.new("UIStroke", rangeCard)
     rcStroke.Thickness = 1
-    rcStroke.Transparency = 0.35
-    local rcSG = Instance.new("UIGradient", rcStroke)
-    rcSG.Color = ColorSequence.new(Theme.BorderLt, Theme.Accent2)
+    rcStroke.Transparency = 0.4
+    rcStroke.Color = Theme.BorderLt
 
     local rcLbl = Instance.new("TextLabel", rangeCard)
     rcLbl.Text = "PLOT RANGE"
@@ -1220,7 +1229,7 @@ local function buildUI()
         b.MouseButton1Click:Connect(function()
             State.plotMin, State.plotMax = 1, val
             rcVal.Text = string.format("1 → %d", State.plotMax)
-            acInfo.Text = string.format("AFK mode · every %.1fs · plot %d→%d",
+            acInfo.Text = string.format("every %.1fs · plot %d→%d",
                 State.collectRate, State.plotMin, State.plotMax)
         end)
         return b
@@ -1241,7 +1250,7 @@ local function buildUI()
             data.stroke.Color = on and Theme.AccentLt or Theme.Border
             data.name.TextColor3 = on and Theme.Text or Theme.TextDim
             data.icon.TextColor3 = on and Theme.Text or Theme.AccentLt
-            data.btn.BackgroundTransparency = on and 0.15 or 0.8
+            data.btn.BackgroundTransparency = on and 0.15 or 0.7
         end
         mainPage.Visible = (State.page == "MAIN")
         settingsPage.Visible = (State.page == "SETTINGS")
@@ -1255,7 +1264,7 @@ local function buildUI()
     end
 
     --=================================================================
-    -- ปุ่มมุมขวาบน: ย่อ + ปิด
+    -- ปุ่มมุมขวาบน
     --=================================================================
     local topBtnsFrame = Instance.new("Frame")
     topBtnsFrame.Size = UDim2.new(0, 60, 0, 22)
@@ -1263,7 +1272,6 @@ local function buildUI()
     topBtnsFrame.BackgroundTransparency = 1
     topBtnsFrame.Parent = win
 
-    -- ปุ่มย่อ
     local minBtn = Instance.new("TextButton")
     minBtn.Size = UDim2.new(0, 22, 0, 22)
     minBtn.Position = UDim2.new(0, 0, 0, 0)
@@ -1283,7 +1291,6 @@ local function buildUI()
     minS.Thickness = 1
     minS.Transparency = 0.5
 
-    -- ปุ่มปิด
     local closeBtn = Instance.new("TextButton")
     closeBtn.Size = UDim2.new(0, 22, 0, 22)
     closeBtn.Position = UDim2.new(0, 32, 0, 0)
@@ -1303,7 +1310,6 @@ local function buildUI()
     closeS.Thickness = 1
     closeS.Transparency = 0.4
 
-    -- hover
     minBtn.MouseEnter:Connect(function()
         TweenService:Create(minBtn, TweenInfo.new(0.15), {BackgroundTransparency=0.1}):Play()
     end)
@@ -1317,33 +1323,26 @@ local function buildUI()
         TweenService:Create(closeBtn, TweenInfo.new(0.15), {BackgroundTransparency=0.2}):Play()
     end)
 
-    -- ★ ย่อ: ซ่อน win โชว์ miniBtn
     minBtn.MouseButton1Click:Connect(function()
         State.minimized = true
         win.Visible = false
         miniBtn.Visible = true
-        -- ปิด blur ตอนย่อ
         if blur then blur.Size = 0 end
     end)
 
-    -- ★ ปิด: ทำลาย GUI + หยุดระบบทั้งหมด + ปิด blur
     closeBtn.MouseButton1Click:Connect(function()
-        -- stop ทั้งหมด
         pcall(stop)
         pcall(stopCollect)
-        -- ลบ blur
         pcall(function() blur:Destroy() end)
-        -- ลบ GUI
         pcall(function() gui:Destroy() end)
         print("[AxionHub] Script closed by user.")
     end)
 
-    -- ★ คลิก miniBtn: เปิด win กลับ
     miniBtn.MouseButton1Click:Connect(function()
         State.minimized = false
         win.Visible = true
         miniBtn.Visible = false
-        if blur then blur.Size = 12 end
+        if blur then blur.Size = 18 end
     end)
 
     -- Drag
@@ -1374,9 +1373,7 @@ local function buildUI()
         end
     end)
 
-    -- Apply page เริ่มต้น
     applyPage()
-
     print("[AxionHub] buildUI() finished.")
 end
 
@@ -1388,4 +1385,4 @@ if not ok then
     warn("[AxionHub] buildUI ERROR:", err)
 end
 
-print("[AxionHub] v8 ready.")
+print("[AxionHub] v9 ready — manual start (no auto).")
