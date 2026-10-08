@@ -3,47 +3,79 @@ if not shared then
 	return warn("No shared, no script.")
 end
 
+if not game:IsLoaded() then
+	game.Loaded:Wait()
+end
+
 local AxionHub = {
 	alive = true,
 	connections = {},
+	spinners = {},
+	restores = {},
 	gui = nil,
 	blur = nil,
 }
 
 -- Constants.
-local HUB_NAME = "AxionHub_AutoDice"
-local HUB_VERSION = "v16"
+local HUB_VERSION = "v17"
 local WHITE = Color3.new(1, 1, 1)
 local SIDEBAR_WIDTH = 150
 local CORNER_RADIUS = 12
+local CONFIG_FOLDER = "AxionHub"
+local CONFIG_FILE = "AxionHub/config.json"
+local RELOAD_FILE = "AxionHub.lua"
+local SAFE_MAX_RATE = 30
+local WATCHDOG_TIMEOUT = 90
+local IDLE_PULSE_MIN = 90
+local IDLE_PULSE_MAX = 180
+local TOGGLE_KEY = Enum.KeyCode.RightShift
+local PERSIST_KEYS = {
+	"mode",
+	"spamSpeed",
+	"bypassAnim",
+	"killCutscene",
+	"plotMin",
+	"plotMax",
+	"antiAfk",
+	"autoReconnect",
+	"autoResume",
+	"lowPower",
+	"antiKick",
+	"safeMode",
+}
+
+local cloneRef = cloneref or function(value)
+	return value
+end
 
 -- Services.
-local playersService = game:GetService("Players")
-local replicatedStorage = game:GetService("ReplicatedStorage")
-local runService = game:GetService("RunService")
-local tweenService = game:GetService("TweenService")
-local userInputService = game:GetService("UserInputService")
-local lighting = game:GetService("Lighting")
+local playersService = cloneRef(game:GetService("Players"))
+local replicatedStorage = cloneRef(game:GetService("ReplicatedStorage"))
+local runService = cloneRef(game:GetService("RunService"))
+local tweenService = cloneRef(game:GetService("TweenService"))
+local userInputService = cloneRef(game:GetService("UserInputService"))
+local lighting = cloneRef(game:GetService("Lighting"))
+local teleportService = cloneRef(game:GetService("TeleportService"))
+local guiService = cloneRef(game:GetService("GuiService"))
+local httpService = cloneRef(game:GetService("HttpService"))
+local virtualUser = cloneRef(game:GetService("VirtualUser"))
+local coreGui = cloneRef(game:GetService("CoreGui"))
 
 local localPlayer = playersService.LocalPlayer
 
 local Config = {
-	-- Logo accents: blue-violet to magenta-purple.
 	accentBlue = Color3.fromRGB(84, 38, 232),
 	accentPink = Color3.fromRGB(172, 44, 248),
 	accentLight = Color3.fromRGB(206, 164, 255),
 
-	-- Backgrounds: near-black with a purple glow.
 	bgTop = Color3.fromRGB(26, 12, 48),
 	bgBot = Color3.fromRGB(4, 2, 9),
 	sidebarTop = Color3.fromRGB(14, 6, 26),
 	sidebarBot = Color3.fromRGB(2, 1, 5),
 
-	-- Cards.
 	cardTop = Color3.fromRGB(44, 20, 82),
 	cardBot = Color3.fromRGB(14, 6, 28),
 
-	-- Capsules.
 	chipOff = Color3.fromRGB(26, 14, 44),
 	chipHover = Color3.fromRGB(44, 26, 74),
 	track = Color3.fromRGB(10, 5, 20),
@@ -61,7 +93,6 @@ local Config = {
 	blurSize = 6,
 }
 
--- Short mode descriptions shown under the mode capsules.
 local MODE_INFO = {
 	AUTO = "ให้เซิร์ฟเวอร์ออโต้โรลให้ เบาและเสถียร",
 	SPAM = "ยิงรีโมทโรลรัวๆ ตามความเร็วที่ตั้ง",
@@ -75,9 +106,11 @@ local State = {
 	rolls = 0,
 	autoRollOn = false,
 	diceThread = nil,
-	spamSpeed = 0.03,
+	spamSpeed = 0.04,
 	bypassAnim = true,
 	killCutscene = true,
+	failStreak = 0,
+	lastActivity = 0,
 
 	autoCollect = false,
 	collectThread = nil,
@@ -88,8 +121,62 @@ local State = {
 	lastPlot = 0,
 	collectStarted = false,
 
+	-- AFK / protection.
+	antiAfk = true,
+	autoReconnect = true,
+	autoResume = true,
+	lowPower = false,
+	antiKick = true,
+	safeMode = true,
+	reconnecting = false,
+	reconnects = 0,
+	reloadQueued = false,
+	resumeRoll = false,
+	resumeCollect = false,
+	startTime = os.clock(),
+	origFps = 60,
+
 	minimized = false,
+	animating = false,
 }
+
+-- Filled by buildUI so logic code can reach the interface.
+local uiRefs = {}
+local notify = function() end
+
+---Random identifier so the gui has no fixed name.
+local function randomName()
+	local chars = {}
+	for index = 1, math.random(10, 16) do
+		chars[index] = string.char(math.random(97, 122))
+	end
+	return table.concat(chars)
+end
+
+---Humanize a delay when safe mode is on.
+local function jitter(base)
+	if not State.safeMode then
+		return base
+	end
+
+	return base * (0.8 + math.random() * 0.5)
+end
+
+---Delay between spam rolls, capped in safe mode.
+local function getRollDelay()
+	local delay = State.spamSpeed
+
+	if State.safeMode then
+		delay = math.max(delay, 1 / SAFE_MAX_RATE)
+	end
+
+	return jitter(delay)
+end
+
+local function formatTime(seconds)
+	seconds = math.floor(seconds)
+	return string.format("%02d:%02d:%02d", seconds // 3600, (seconds % 3600) // 60, seconds % 60)
+end
 
 ---Parent that keeps the gui hidden from the game when possible.
 local function safeParent()
@@ -100,7 +187,7 @@ local function safeParent()
 		end
 	end
 
-	return game:GetService("CoreGui")
+	return coreGui
 end
 
 ---Walk a path of children with a timeout on each step.
@@ -130,6 +217,52 @@ end
 local function track(connection)
 	table.insert(AxionHub.connections, connection)
 	return connection
+end
+
+-- Persistence.
+
+---Save settings and what was running so a rejoin can resume.
+local function saveConfig()
+	if not writefile then
+		return
+	end
+
+	local data = {}
+	for _, key in ipairs(PERSIST_KEYS) do
+		data[key] = State[key]
+	end
+	data.wasRolling = State.running
+	data.wasCollecting = State.autoCollect
+
+	pcall(function()
+		if makefolder and isfolder and not isfolder(CONFIG_FOLDER) then
+			makefolder(CONFIG_FOLDER)
+		end
+		writefile(CONFIG_FILE, httpService:JSONEncode(data))
+	end)
+end
+
+local function loadConfig()
+	if not (isfile and readfile and isfile(CONFIG_FILE)) then
+		return
+	end
+
+	local ok, data = pcall(function()
+		return httpService:JSONDecode(readfile(CONFIG_FILE))
+	end)
+
+	if not ok or type(data) ~= "table" then
+		return
+	end
+
+	for _, key in ipairs(PERSIST_KEYS) do
+		if data[key] ~= nil and type(data[key]) == type(State[key]) then
+			State[key] = data[key]
+		end
+	end
+
+	State.resumeRoll = data.wasRolling == true
+	State.resumeCollect = data.wasCollecting == true
 end
 
 local Remotes = {
@@ -239,7 +372,23 @@ local function tickAntiFX()
 	end
 end
 
----Invoke one roll and keep server auto roll armed in AUTO / BOTH.
+-- Dice / collect logic.
+
+---Ask the server to run auto roll once.
+local function armAutoRoll()
+	if State.autoRollOn or not Remotes.setAutoRoll then
+		return
+	end
+
+	local ok = pcall(function()
+		Remotes.setAutoRoll:FireServer(true)
+	end)
+
+	if ok then
+		State.autoRollOn = true
+	end
+end
+
 local function doRoll()
 	if not Remotes.rollDice then
 		return
@@ -251,32 +400,38 @@ local function doRoll()
 
 	if ok then
 		State.rolls = State.rolls + 1
+		State.failStreak = 0
+		State.lastActivity = os.clock()
+	else
+		State.failStreak = State.failStreak + 1
 	end
 
-	if (State.mode == "AUTO" or State.mode == "BOTH") and not State.autoRollOn and Remotes.setAutoRoll then
-		pcall(function()
-			Remotes.setAutoRoll:FireServer(true)
-			State.autoRollOn = true
-		end)
+	if State.mode == "AUTO" or State.mode == "BOTH" then
+		armAutoRoll()
 	end
 end
 
 local function diceLoop()
 	State.running = true
+	State.lastActivity = os.clock()
 
 	while State.running do
+		local delay
+
 		if State.mode == "SPAM" or State.mode == "BOTH" then
 			doRoll()
-		elseif State.mode == "AUTO" then
-			if not State.autoRollOn and Remotes.setAutoRoll then
-				pcall(function()
-					Remotes.setAutoRoll:FireServer(true)
-					State.autoRollOn = true
-				end)
-			end
+			delay = getRollDelay()
+		else
+			armAutoRoll()
+			delay = jitter(1)
 		end
 
-		task.wait(State.spamSpeed)
+		-- Back off when the remote keeps failing.
+		if State.failStreak > 0 then
+			delay = delay + math.min(State.failStreak * 0.5, 8)
+		end
+
+		task.wait(delay)
 	end
 end
 
@@ -293,6 +448,7 @@ local function stopDice()
 
 	if State.diceThread then
 		pcall(task.cancel, State.diceThread)
+		State.diceThread = nil
 	end
 
 	if State.autoRollOn and Remotes.setAutoRoll then
@@ -316,18 +472,36 @@ local function collectOnePlot(plotNumber)
 	State.lastPlot = plotNumber
 end
 
+---Plot order, shuffled in safe mode so it is not a perfect sweep.
+local function buildPlotOrder()
+	local order = {}
+
+	for plotNumber = State.plotMin, State.plotMax do
+		table.insert(order, plotNumber)
+	end
+
+	if State.safeMode then
+		for index = #order, 2, -1 do
+			local swap = math.random(1, index)
+			order[index], order[swap] = order[swap], order[index]
+		end
+	end
+
+	return order
+end
+
 local function collectLoop()
 	while State.autoCollect do
-		for plotNumber = State.plotMin, State.plotMax do
+		for _, plotNumber in ipairs(buildPlotOrder()) do
 			if not State.autoCollect then
 				break
 			end
 
 			collectOnePlot(plotNumber)
-			task.wait(0.04)
+			task.wait(jitter(0.06))
 		end
 
-		task.wait(State.collectRate)
+		task.wait(jitter(State.collectRate))
 	end
 end
 
@@ -351,10 +525,196 @@ local function stopCollect()
 	end
 end
 
+---Restart the dice loop if it silently stalls.
+local function watchdogLoop()
+	while AxionHub.alive do
+		task.wait(5)
+
+		local spamming = State.mode == "SPAM" or State.mode == "BOTH"
+		if State.running and spamming and os.clock() - State.lastActivity > WATCHDOG_TIMEOUT then
+			State.lastActivity = os.clock()
+			stopDice()
+			task.wait(1)
+			startDice()
+		end
+	end
+end
+
+-- AFK 24/7.
+
+---Tiny fake input so the client never counts as idle.
+local function pulseIdle()
+	pcall(function()
+		virtualUser:CaptureController()
+		virtualUser:ClickButton2(Vector2.new(math.random(1, 50), math.random(1, 50)))
+	end)
+end
+
+local function initAntiAfk()
+	-- Disable the default idle connections first.
+	if getconnections then
+		pcall(function()
+			for _, connection in ipairs(getconnections(localPlayer.Idled)) do
+				connection:Disable()
+				table.insert(AxionHub.restores, function()
+					connection:Enable()
+				end)
+			end
+		end)
+	end
+
+	track(localPlayer.Idled:Connect(function()
+		if State.antiAfk then
+			pulseIdle()
+		end
+	end))
+
+	task.spawn(function()
+		while AxionHub.alive do
+			task.wait(math.random(IDLE_PULSE_MIN, IDLE_PULSE_MAX))
+			if State.antiAfk then
+				pulseIdle()
+			end
+		end
+	end)
+end
+
+---Re-run the script after the teleport when the file exists.
+local function queueReload()
+	if State.reloadQueued then
+		return
+	end
+
+	if not (queue_on_teleport and isfile and isfile(RELOAD_FILE)) then
+		return
+	end
+
+	State.reloadQueued = true
+	pcall(queue_on_teleport, string.format('loadstring(readfile("%s"))()', RELOAD_FILE))
+end
+
+---Retry teleporting with a growing delay until it works.
+local function reconnect()
+	if State.reconnecting or not State.autoReconnect or not AxionHub.alive then
+		return
+	end
+
+	State.reconnecting = true
+	saveConfig()
+
+	task.spawn(function()
+		local attempt = 0
+
+		while AxionHub.alive and State.autoReconnect do
+			attempt = attempt + 1
+			State.reconnects = attempt
+
+			pcall(function()
+				teleportService:Teleport(game.PlaceId, localPlayer)
+			end)
+
+			task.wait(math.min(4 * attempt, 45) + math.random() * 3)
+		end
+
+		State.reconnecting = false
+	end)
+end
+
+local function initReconnect()
+	track(guiService.ErrorMessageChanged:Connect(function(message)
+		if message and message ~= "" then
+			reconnect()
+		end
+	end))
+
+	task.spawn(function()
+		local promptGui = coreGui:WaitForChild("RobloxPromptGui", 15)
+		local overlay = promptGui and promptGui:WaitForChild("promptOverlay", 15)
+		if not overlay then
+			return
+		end
+
+		track(overlay.ChildAdded:Connect(function(child)
+			if child.Name == "ErrorPrompt" then
+				reconnect()
+			end
+		end))
+
+		if overlay:FindFirstChild("ErrorPrompt") then
+			reconnect()
+		end
+	end)
+
+	track(localPlayer.OnTeleport:Connect(function(teleportState)
+		if teleportState == Enum.TeleportState.Started then
+			queueReload()
+		end
+	end))
+end
+
+---Low power: no 3D render and a low fps cap for long idle sessions.
+local function applyLowPower(on)
+	pcall(function()
+		runService:Set3dRenderingEnabled(not on)
+	end)
+
+	if setfpscap then
+		pcall(setfpscap, on and 15 or State.origFps)
+	end
+end
+
+---Block client-side Kick calls on the local player.
+local function installAntiKick()
+	local oldNamecall
+	local namecallHook = newcclosure(function(self, ...)
+		local method = getnamecallmethod()
+
+		if
+			method == "Kick"
+			and State.antiKick
+			and AxionHub.alive
+			and not checkcaller()
+			and typeof(self) == "Instance"
+			and compareinstances(self, localPlayer)
+		then
+			return
+		end
+
+		return oldNamecall(self, ...)
+	end)
+	pcall(setstackhidden, namecallHook, true)
+	oldNamecall = hookmetamethod(game, "__namecall", namecallHook)
+
+	local kickFunction = localPlayer.Kick
+	local oldKick
+	local kickHook = newcclosure(function(self, ...)
+		if
+			State.antiKick
+			and AxionHub.alive
+			and not checkcaller()
+			and typeof(self) == "Instance"
+			and compareinstances(self, localPlayer)
+		then
+			return
+		end
+
+		return oldKick(self, ...)
+	end)
+	pcall(setstackhidden, kickHook, true)
+
+	local ok, original = pcall(hookfunction, kickFunction, kickHook)
+	if ok then
+		oldKick = original
+		table.insert(AxionHub.restores, function()
+			pcall(restorefunction, kickFunction)
+		end)
+	end
+end
+
 -- UI helpers.
 
-local function tween(object, duration, goal)
-	local info = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local function tween(object, duration, goal, style, direction)
+	local info = TweenInfo.new(duration, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out)
 	tweenService:Create(object, info, goal):Play()
 end
 
@@ -373,12 +733,19 @@ local function createGradient(parent, rotation, colorSequence)
 	return gradient
 end
 
--- Shared brand gradient (blue-violet to magenta-purple).
+---Register a gradient that slowly rotates.
+local function spin(gradient, speed)
+	table.insert(AxionHub.spinners, {
+		gradient = gradient,
+		speed = speed,
+		offset = gradient.Rotation,
+	})
+end
+
 local function accentSequence()
 	return ColorSequence.new(Config.accentBlue, Config.accentPink)
 end
 
--- Gradient outline so frames glow like the logo.
 local function createStroke(parent, thickness, transparency)
 	local stroke = Instance.new("UIStroke")
 	stroke.Color = WHITE
@@ -386,8 +753,8 @@ local function createStroke(parent, thickness, transparency)
 	stroke.Transparency = transparency
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Parent = parent
-	createGradient(stroke, 45, accentSequence())
-	return stroke
+	local gradient = createGradient(stroke, 45, accentSequence())
+	return stroke, gradient
 end
 
 local function makeLabel(parent, text, size, position, font, textSize, color, alignment)
@@ -405,7 +772,6 @@ local function makeLabel(parent, text, size, position, font, textSize, color, al
 	return label
 end
 
--- Card: purple to black gradient with a faint glowing outline.
 local function makeCard(parent, size, position)
 	local card = Instance.new("Frame")
 	card.Size = size
@@ -422,7 +788,17 @@ local function makeCard(parent, size, position)
 	return card
 end
 
--- Capsule: dark base, gradient glow fades in when active, label stays untinted.
+---A page is a CanvasGroup so it can fade as one piece.
+local function makePage(parent)
+	local page = Instance.new("CanvasGroup")
+	page.Size = UDim2.new(1, 0, 1, 0)
+	page.BackgroundTransparency = 1
+	page.BorderSizePixel = 0
+	page.Visible = false
+	page.Parent = parent
+	return page
+end
+
 local function makeChip(parent, size, position, text, textSize, radius)
 	local button = Instance.new("TextButton")
 	button.Size = size
@@ -509,7 +885,6 @@ local function addHover(chip)
 	end))
 end
 
--- Pill toggle: gradient capsule fill fades in, knob slides.
 local PILL_SIZE = UDim2.new(0, 46, 0, 24)
 local KNOB_SIZE = UDim2.new(0, 18, 0, 18)
 local KNOB_PAD = 3
@@ -577,7 +952,7 @@ local function stylePill(parts, on, instant)
 	end
 
 	tween(parts.fill, 0.2, fillGoal)
-	tween(parts.knob, 0.22, knobGoal)
+	tween(parts.knob, 0.3, knobGoal, Enum.EasingStyle.Back)
 end
 
 local function makeToggle(parent, y, title, defaultOn, callback)
@@ -613,13 +988,9 @@ end
 ---Build the whole interface.
 local function buildUI()
 	local parent = safeParent()
-	local old = parent:FindFirstChild(HUB_NAME)
-	if old then
-		old:Destroy()
-	end
 
 	local gui = Instance.new("ScreenGui")
-	gui.Name = HUB_NAME
+	gui.Name = randomName()
 	gui.ResetOnSpawn = false
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.IgnoreGuiInset = true
@@ -629,9 +1000,9 @@ local function buildUI()
 
 	-- Minimized launcher.
 	local miniBtn = Instance.new("TextButton")
-	miniBtn.Name = "MiniBtn"
 	miniBtn.Size = UDim2.new(0, 48, 0, 48)
-	miniBtn.Position = UDim2.new(0, 20, 0, 100)
+	miniBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+	miniBtn.Position = UDim2.new(0, 44, 0, 124)
 	miniBtn.BackgroundColor3 = WHITE
 	miniBtn.BorderSizePixel = 0
 	miniBtn.Text = ""
@@ -641,26 +1012,36 @@ local function buildUI()
 	miniBtn.Draggable = true
 	miniBtn.Parent = gui
 	createCorner(miniBtn, 999)
-	createGradient(miniBtn, 45, accentSequence())
+	spin(createGradient(miniBtn, 45, accentSequence()), 60)
 	createStroke(miniBtn, 1.5, 0.3)
+
+	local miniScale = Instance.new("UIScale")
+	miniScale.Scale = 0
+	miniScale.Parent = miniBtn
 
 	makeLabel(miniBtn, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 22, Config.text, Enum.TextXAlignment.Center)
 
-	-- One window holds the sidebar and content side by side.
-	local win = Instance.new("Frame")
+	-- Window is a CanvasGroup so the whole thing fades and scales.
+	local win = Instance.new("CanvasGroup")
 	win.Name = "Window"
-	win.Size = UDim2.new(0, 590, 0, 392)
-	win.Position = UDim2.new(0.5, -295, 0.5, -196)
+	win.Size = UDim2.new(0, 590, 0, 410)
+	win.AnchorPoint = Vector2.new(0.5, 0.5)
+	win.Position = UDim2.new(0.5, 0, 0.5, 0)
 	win.BackgroundColor3 = WHITE
 	win.BackgroundTransparency = 0.04
 	win.BorderSizePixel = 0
+	win.GroupTransparency = 1
 	win.Active = true
 	win.Parent = gui
 	createCorner(win, CORNER_RADIUS + 4)
 	createGradient(win, 115, ColorSequence.new(Config.bgTop, Config.bgBot))
-	createStroke(win, 1.5, 0.15)
+	local winStroke, winStrokeGradient = createStroke(win, 1.5, 1)
+	spin(winStrokeGradient, 35)
 
-	-- Sidebar: deeper black so the content panel stands out.
+	local winScale = Instance.new("UIScale")
+	winScale.Scale = 0.85
+	winScale.Parent = win
+
 	local sidebar = Instance.new("Frame")
 	sidebar.Size = UDim2.new(0, SIDEBAR_WIDTH, 1, 0)
 	sidebar.BackgroundColor3 = WHITE
@@ -679,18 +1060,21 @@ local function buildUI()
 	logoBox.ZIndex = 3
 	logoBox.Parent = sidebar
 	createCorner(logoBox, CORNER_RADIUS)
-	createGradient(logoBox, 45, accentSequence())
+	spin(createGradient(logoBox, 45, accentSequence()), 70)
 	createStroke(logoBox, 1, 0.4)
 
 	makeLabel(logoBox, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 22, Config.text, Enum.TextXAlignment.Center)
 
 	makeLabel(sidebar, "AxionHub", UDim2.new(1, -20, 0, 18), UDim2.new(0, 16, 0, 72), Config.fontBold, 15, Config.text)
-
 	makeLabel(sidebar, "AutoDice  " .. HUB_VERSION, UDim2.new(1, -20, 0, 14), UDim2.new(0, 16, 0, 90), Config.font, 10, Config.accentLight)
+
+	local uptimeLabel = makeLabel(sidebar, "⏱ 00:00:00", UDim2.new(1, -20, 0, 14), UDim2.new(0, 16, 1, -40), Config.fontMedium, 10.5, Config.textDim)
+	local shieldLabel = makeLabel(sidebar, "● protected", UDim2.new(1, -20, 0, 12), UDim2.new(0, 16, 1, -24), Config.font, 9, Config.good)
 
 	local pages = {
 		{ id = "MAIN", icon = "🏠", label = "Main", desc = "dice & collect" },
 		{ id = "SETTINGS", icon = "⚙", label = "Settings", desc = "animation / range" },
+		{ id = "AFK", icon = "🛡", label = "AFK & Safe", desc = "24/7 · anti-ban" },
 	}
 
 	local pageButtons = {}
@@ -732,7 +1116,6 @@ local function buildUI()
 		}
 	end
 
-	-- Content panel (transparent, window gradient shows through).
 	local content = Instance.new("Frame")
 	content.Size = UDim2.new(1, -SIDEBAR_WIDTH, 1, 0)
 	content.Position = UDim2.new(0, SIDEBAR_WIDTH, 0, 0)
@@ -740,13 +1123,53 @@ local function buildUI()
 	content.BorderSizePixel = 0
 	content.Parent = win
 
-	-- Main page.
-	local mainPage = Instance.new("Frame")
-	mainPage.Size = UDim2.new(1, 0, 1, 0)
-	mainPage.BackgroundTransparency = 1
-	mainPage.Parent = content
+	local mainPage = makePage(content)
+	local settingsPage = makePage(content)
+	local afkPage = makePage(content)
+	local pageFrames = { MAIN = mainPage, SETTINGS = settingsPage, AFK = afkPage }
 
-	-- Header leaves room on the right for the window buttons.
+	-- Toast notification that slides up from the bottom.
+	local toast = Instance.new("Frame")
+	toast.Size = UDim2.new(0, 250, 0, 28)
+	toast.AnchorPoint = Vector2.new(0.5, 0)
+	toast.Position = UDim2.new(0.5, 0, 0, 420)
+	toast.BackgroundColor3 = Config.cardBot
+	toast.BackgroundTransparency = 1
+	toast.BorderSizePixel = 0
+	toast.ZIndex = 20
+	toast.Parent = content
+	createCorner(toast, 999)
+	local toastStroke = createStroke(toast, 1, 1)
+	local toastLabel = makeLabel(toast, "", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontMedium, 11, Config.text, Enum.TextXAlignment.Center)
+	toastLabel.ZIndex = 21
+	toastLabel.TextTransparency = 1
+
+	local toastToken = 0
+
+	notify = function(text, color)
+		toastToken = toastToken + 1
+		local token = toastToken
+
+		toastLabel.Text = text
+		toastLabel.TextColor3 = color or Config.text
+		toast.Position = UDim2.new(0.5, 0, 0, 420)
+
+		tween(toast, 0.35, { Position = UDim2.new(0.5, 0, 0, 372), BackgroundTransparency = 0.1 }, Enum.EasingStyle.Back)
+		tween(toastLabel, 0.25, { TextTransparency = 0 })
+		tween(toastStroke, 0.25, { Transparency = 0.4 })
+
+		task.delay(2.2, function()
+			if token ~= toastToken or not AxionHub.alive then
+				return
+			end
+
+			tween(toast, 0.3, { Position = UDim2.new(0.5, 0, 0, 420), BackgroundTransparency = 1 })
+			tween(toastLabel, 0.25, { TextTransparency = 1 })
+			tween(toastStroke, 0.25, { Transparency = 1 })
+		end)
+	end
+
+	-- Main page.
 	local header = makeCard(mainPage, UDim2.new(1, -90, 0, 42), UDim2.new(0, 18, 0, 16))
 
 	local dot = Instance.new("Frame")
@@ -761,18 +1184,6 @@ local function buildUI()
 	local statusLabel = makeLabel(header, "READY", UDim2.new(1, -44, 1, 0), UDim2.new(0, 30, 0, 0), Config.font, 11, Config.text)
 	statusLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
-	task.spawn(function()
-		while statusLabel.Parent and AxionHub.alive do
-			local status = remotesReady and (State.running and "RUNNING" or "IDLE") or "NO REMOTES"
-			local color = remotesReady and (State.running and Config.good or Config.muted) or Config.bad
-
-			statusLabel.Text = string.format("💤 · %s · rolls: %d · 💰 %d", status, State.rolls, State.collected)
-			dot.BackgroundColor3 = color
-			task.wait(0.2)
-		end
-	end)
-
-	-- Mode card.
 	local modeCard = makeCard(mainPage, UDim2.new(1, -36, 0, 132), UDim2.new(0, 18, 0, 70))
 
 	makeLabel(modeCard, "MODE", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
@@ -805,23 +1216,24 @@ local function buildUI()
 		track(chip.button.MouseButton1Click:Connect(function()
 			State.mode = mode
 			refreshModes()
+			saveConfig()
 		end))
 	end
 
 	for key, chip in pairs(modeChips) do
 		styleChip(chip, key == State.mode, true)
 	end
+	modeDesc.Text = MODE_INFO[State.mode]
 
-	-- Same toggle builder as AFK Collect so both switches match.
-	local autoRollToggle
-	autoRollToggle = makeToggle(modeCard, 88, "🎲 Auto Roll", false, function(value)
+	uiRefs.autoRoll = makeToggle(modeCard, 88, "🎲 Auto Roll", false, function(value)
 		if value then
 			startDice()
 		else
 			stopDice()
 		end
 
-		autoRollToggle.set(State.running)
+		uiRefs.autoRoll.set(State.running)
+		saveConfig()
 	end)
 
 	-- Speed card.
@@ -829,7 +1241,7 @@ local function buildUI()
 
 	makeLabel(speedCard, "SPAM SPEED", UDim2.new(0.5, 0, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
 
-	local speedValue = makeLabel(speedCard, "33 / sec", UDim2.new(0.5, -14, 0, 14), UDim2.new(0.5, 0, 0, 8), Config.fontBold, 11, Config.text, Enum.TextXAlignment.Right)
+	local speedValue = makeLabel(speedCard, "", UDim2.new(0.6, -14, 0, 14), UDim2.new(0.4, 0, 0, 8), Config.fontBold, 11, Config.text, Enum.TextXAlignment.Right)
 
 	local sliderTrack = Instance.new("TextButton")
 	sliderTrack.Size = UDim2.new(1, -28, 0, 10)
@@ -863,29 +1275,42 @@ local function buildUI()
 
 	local draggingSlider = false
 
+	local function updateSpeedText()
+		local rate = math.clamp(math.floor(1 / State.spamSpeed + 0.5), 20, 200)
+		local text = rate .. " / sec"
+
+		if State.safeMode and rate > SAFE_MAX_RATE then
+			text = text .. "  ·  safe cap " .. SAFE_MAX_RATE
+		end
+
+		speedValue.Text = text
+	end
+
+	uiRefs.updateSpeed = updateSpeedText
+
 	local function applyRelative(relative)
 		fill.Size = UDim2.new(relative, 0, 1, 0)
 		sliderKnob.Position = UDim2.new(relative, -8, 0.5, -8)
 
 		local rate = math.floor(20 + relative * 180)
 		State.spamSpeed = 1 / rate
-		speedValue.Text = rate .. " / sec"
+		updateSpeedText()
 	end
 
 	local function setFromX(x)
 		applyRelative(math.clamp((x - sliderTrack.AbsolutePosition.X) / sliderTrack.AbsoluteSize.X, 0, 1))
 	end
 
-	-- Match the slider to the default spam speed.
 	local initialRate = math.clamp(math.floor(1 / State.spamSpeed + 0.5), 20, 200)
 	fill.Size = UDim2.new((initialRate - 20) / 180, 0, 1, 0)
 	sliderKnob.Position = UDim2.new((initialRate - 20) / 180, -8, 0.5, -8)
-	speedValue.Text = initialRate .. " / sec"
+	updateSpeedText()
 
 	track(sliderTrack.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			draggingSlider = true
 			setFromX(input.Position.X)
+			tween(sliderKnob, 0.15, { Size = UDim2.new(0, 20, 0, 20) })
 		end
 	end))
 
@@ -900,19 +1325,26 @@ local function buildUI()
 
 	track(userInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			draggingSlider = false
+			if draggingSlider then
+				draggingSlider = false
+				tween(sliderKnob, 0.15, { Size = UDim2.new(0, 16, 0, 16) })
+				saveConfig()
+			end
 		end
 	end))
 
 	-- Collect card.
 	local collectCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 284))
 
-	makeToggle(collectCard, 4, "💰 AFK Collect Money", State.autoCollect, function(value)
+	uiRefs.collect = makeToggle(collectCard, 4, "💰 AFK Collect Money", State.autoCollect, function(value)
 		if value then
 			startCollect()
 		else
 			stopCollect()
 		end
+
+		uiRefs.collect.set(State.autoCollect)
+		saveConfig()
 	end)
 
 	makeLabel(
@@ -926,12 +1358,6 @@ local function buildUI()
 	)
 
 	-- Settings page.
-	local settingsPage = Instance.new("Frame")
-	settingsPage.Size = UDim2.new(1, 0, 1, 0)
-	settingsPage.BackgroundTransparency = 1
-	settingsPage.Visible = false
-	settingsPage.Parent = content
-
 	local settingsHeader = makeCard(settingsPage, UDim2.new(1, -90, 0, 42), UDim2.new(0, 18, 0, 16))
 
 	makeLabel(settingsHeader, "⚙  Settings", UDim2.new(1, -30, 1, 0), UDim2.new(0, 16, 0, 0), Config.fontBold, 12, Config.text)
@@ -940,10 +1366,12 @@ local function buildUI()
 
 	makeToggle(settingsCard, 4, "Bypass Roll Animation", State.bypassAnim, function(value)
 		State.bypassAnim = value
+		saveConfig()
 	end)
 
 	makeToggle(settingsCard, 48, "Kill Camera Cutscene", State.killCutscene, function(value)
 		State.killCutscene = value
+		saveConfig()
 	end)
 
 	local rangeCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 80), UDim2.new(0, 18, 0, 172))
@@ -970,6 +1398,7 @@ local function buildUI()
 			State.plotMax = value
 			rangeValue.Text = string.format("1 → %d", State.plotMax)
 			refreshRange()
+			saveConfig()
 		end))
 	end
 
@@ -981,7 +1410,67 @@ local function buildUI()
 		styleChip(chip, State.plotMax == value, true)
 	end
 
-	-- Page switching.
+	-- AFK & protection page.
+	local afkHeader = makeCard(afkPage, UDim2.new(1, -90, 0, 42), UDim2.new(0, 18, 0, 16))
+
+	makeLabel(afkHeader, "🛡  AFK 24/7 & Protection", UDim2.new(1, -30, 1, 0), UDim2.new(0, 16, 0, 0), Config.fontBold, 12, Config.text)
+
+	local sessionCard = makeCard(afkPage, UDim2.new(1, -36, 0, 50), UDim2.new(0, 18, 0, 66))
+
+	makeLabel(sessionCard, "SESSION", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 6), Config.fontBold, 9.5, Config.accentLight)
+	local sessionLabel = makeLabel(sessionCard, "", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 24), Config.fontMedium, 11, Config.text)
+
+	local switchCard = makeCard(afkPage, UDim2.new(1, -36, 0, 236), UDim2.new(0, 18, 0, 124))
+
+	local function addSwitch(y, title, key, onChange)
+		return makeToggle(switchCard, y, title, State[key], function(value)
+			State[key] = value
+
+			if onChange then
+				onChange(value)
+			end
+
+			saveConfig()
+			notify(title .. (value and "  ON" or "  OFF"), value and Config.good or Config.muted)
+		end)
+	end
+
+	addSwitch(4, "💤 Anti-AFK (no idle kick)", "antiAfk")
+	addSwitch(42, "🔁 Auto Reconnect", "autoReconnect")
+	addSwitch(80, "▶ Auto Resume after rejoin", "autoResume")
+	addSwitch(118, "🔋 Low Power Mode", "lowPower", applyLowPower)
+	addSwitch(156, "🚫 Anti-Kick (client)", "antiKick")
+	addSwitch(194, "🕶 Safe Mode (human timing)", "safeMode", function()
+		updateSpeedText()
+	end)
+
+	-- Live status updater.
+	task.spawn(function()
+		while statusLabel.Parent and AxionHub.alive do
+			local status = remotesReady and (State.running and "RUNNING" or "IDLE") or "NO REMOTES"
+			local color = remotesReady and (State.running and Config.good or Config.muted) or Config.bad
+
+			statusLabel.Text = string.format("💤 · %s · rolls: %d · 💰 %d", status, State.rolls, State.collected)
+			dot.BackgroundColor3 = color
+
+			local uptime = formatTime(os.clock() - State.startTime)
+			uptimeLabel.Text = "⏱ " .. uptime
+			sessionLabel.Text = string.format(
+				"%s  ·  reconnects: %d  ·  afk: %s",
+				uptime,
+				State.reconnects,
+				State.antiAfk and "ON" or "OFF"
+			)
+
+			local safe = State.antiAfk and State.antiKick and State.safeMode
+			shieldLabel.Text = safe and "● protected" or "● partial"
+			shieldLabel.TextColor3 = safe and Config.good or Config.muted
+
+			task.wait(0.25)
+		end
+	end)
+
+	-- Page switching with a slide + fade.
 	local function applyPage(instant)
 		for id, data in pairs(pageButtons) do
 			local on = id == State.page
@@ -990,18 +1479,34 @@ local function buildUI()
 			styleChip(data.chip, on, instant)
 		end
 
-		mainPage.Visible = State.page == "MAIN"
-		settingsPage.Visible = State.page == "SETTINGS"
+		for id, frame in pairs(pageFrames) do
+			if id ~= State.page then
+				frame.Visible = false
+			elseif instant then
+				frame.Position = UDim2.new()
+				frame.GroupTransparency = 0
+				frame.Visible = true
+			else
+				frame.Position = UDim2.new(0, 0, 0, 16)
+				frame.GroupTransparency = 1
+				frame.Visible = true
+				tween(frame, 0.35, { Position = UDim2.new(), GroupTransparency = 0 }, Enum.EasingStyle.Quart)
+			end
+		end
 	end
 
 	for id, data in pairs(pageButtons) do
 		track(data.button.MouseButton1Click:Connect(function()
+			if State.page == id then
+				return
+			end
+
 			State.page = id
 			applyPage()
 		end))
 	end
 
-	-- Window buttons, aligned with the header row.
+	-- Window buttons.
 	local topButtons = Instance.new("Frame")
 	topButtons.Size = UDim2.new(0, 54, 0, 22)
 	topButtons.Position = UDim2.new(1, -68, 0, 26)
@@ -1035,36 +1540,110 @@ local function buildUI()
 		tween(closeBtn, 0.15, { BackgroundColor3 = Color3.fromRGB(120, 32, 62) })
 	end))
 
-	-- Background blur.
+	-- Blur sits under the camera, not in Lighting.
 	local blur = Instance.new("BlurEffect")
-	blur.Name = "AxionHubBlur_Internal"
-	blur.Size = Config.blurSize
-	blur.Parent = lighting
+	blur.Name = randomName()
+	blur.Size = 0
+	blur.Parent = workspace.CurrentCamera or lighting
 	AxionHub.blur = blur
 
-	track(minChip.button.MouseButton1Click:Connect(function()
-		State.minimized = true
-		win.Visible = false
-		miniBtn.Visible = true
-		blur.Size = 0
-	end))
-
-	track(miniBtn.MouseButton1Click:Connect(function()
+	-- Open / close animations.
+	local function showWindow()
 		State.minimized = false
+		State.animating = true
+
 		win.Visible = true
-		miniBtn.Visible = false
-		blur.Size = Config.blurSize
-	end))
+		tween(winScale, 0.5, { Scale = 1 }, Enum.EasingStyle.Back)
+		tween(win, 0.3, { GroupTransparency = 0 })
+		tween(winStroke, 0.3, { Transparency = 0.15 })
+		tween(blur, 0.4, { Size = Config.blurSize })
+
+		task.delay(0.5, function()
+			State.animating = false
+		end)
+	end
+
+	local function hideWindow(onDone)
+		State.animating = true
+
+		tween(winScale, 0.25, { Scale = 0.85 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		tween(win, 0.25, { GroupTransparency = 1 })
+		tween(winStroke, 0.25, { Transparency = 1 })
+		tween(blur, 0.25, { Size = 0 })
+
+		task.delay(0.28, function()
+			if not AxionHub.alive then
+				return
+			end
+
+			win.Visible = false
+			State.animating = false
+
+			if onDone then
+				onDone()
+			end
+		end)
+	end
+
+	local function minimize()
+		if State.animating then
+			return
+		end
+
+		State.minimized = true
+		hideWindow(function()
+			miniBtn.Visible = true
+			miniScale.Scale = 0
+			tween(miniScale, 0.4, { Scale = 1 }, Enum.EasingStyle.Back)
+		end)
+	end
+
+	local function restore()
+		if State.animating then
+			return
+		end
+
+		tween(miniScale, 0.2, { Scale = 0 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		task.delay(0.2, function()
+			miniBtn.Visible = false
+		end)
+		showWindow()
+	end
+
+	track(minChip.button.MouseButton1Click:Connect(minimize))
+	track(miniBtn.MouseButton1Click:Connect(restore))
 
 	track(closeBtn.MouseButton1Click:Connect(function()
-		AxionHub.detach()
+		if State.animating then
+			return
+		end
+
+		-- Stop first so the saved config does not auto resume next run.
+		pcall(stopDice)
+		pcall(stopCollect)
+		saveConfig()
+		hideWindow(function()
+			AxionHub.detach()
+		end)
+	end))
+
+	track(userInputService.InputBegan:Connect(function(input, processed)
+		if processed or input.KeyCode ~= TOGGLE_KEY then
+			return
+		end
+
+		if State.minimized then
+			restore()
+		else
+			minimize()
+		end
 	end))
 
 	-- Window drag via the header cards.
 	local draggingWindow = false
 	local dragStart, startPosition
 
-	for _, handle in ipairs({ header, settingsHeader }) do
+	for _, handle in ipairs({ header, settingsHeader, afkHeader }) do
 		track(handle.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 				draggingWindow = true
@@ -1096,6 +1675,8 @@ local function buildUI()
 	end))
 
 	applyPage(true)
+	showWindow()
+
 	return gui
 end
 
@@ -1106,12 +1687,22 @@ function AxionHub.detach()
 	pcall(stopDice)
 	pcall(stopCollect)
 
+	if State.lowPower then
+		pcall(applyLowPower, false)
+	end
+
+	for _, restore in ipairs(AxionHub.restores) do
+		pcall(restore)
+	end
+	table.clear(AxionHub.restores)
+
 	for _, connection in ipairs(AxionHub.connections) do
 		pcall(function()
 			connection:Disconnect()
 		end)
 	end
 	table.clear(AxionHub.connections)
+	table.clear(AxionHub.spinners)
 
 	if AxionHub.blur then
 		pcall(function()
@@ -1126,8 +1717,30 @@ function AxionHub.detach()
 	end
 end
 
----Wire up the anti-fx loops, remotes and the interface.
+---Spin the gradients and run the roll visual killer.
+local function onHeartbeat()
+	tickAntiFX()
+
+	if State.minimized then
+		return
+	end
+
+	local now = os.clock()
+	for _, spinner in ipairs(AxionHub.spinners) do
+		spinner.gradient.Rotation = (spinner.offset + now * spinner.speed) % 360
+	end
+end
+
+---Wire up the anti-fx loops, remotes, afk systems and the interface.
 local function initializeScript()
+	loadConfig()
+
+	State.startTime = os.clock()
+	State.lastActivity = os.clock()
+
+	local okFps, fps = pcall(getfpscap)
+	State.origFps = okFps and tonumber(fps) or 60
+
 	initAntiFX()
 
 	task.spawn(function()
@@ -1137,10 +1750,12 @@ local function initializeScript()
 		end
 	end)
 
-	track(runService.Heartbeat:Connect(tickAntiFX))
+	track(runService.Heartbeat:Connect(onHeartbeat))
 
 	if Remotes.rollMessage then
-		track(Remotes.rollMessage.OnClientEvent:Connect(function() end))
+		track(Remotes.rollMessage.OnClientEvent:Connect(function()
+			State.lastActivity = os.clock()
+		end))
 	end
 
 	-- Resume collecting after respawn.
@@ -1151,7 +1766,40 @@ local function initializeScript()
 		end
 	end))
 
+	for _, step in ipairs({ initAntiAfk, initReconnect, installAntiKick }) do
+		pcall(step)
+	end
+
+	task.spawn(watchdogLoop)
+
 	buildUI()
+
+	if State.lowPower then
+		applyLowPower(true)
+	end
+
+	-- Pick the work back up after a rejoin.
+	if State.autoResume then
+		task.delay(1.5, function()
+			if not AxionHub.alive then
+				return
+			end
+
+			if State.resumeRoll then
+				startDice()
+				uiRefs.autoRoll.set(State.running)
+			end
+
+			if State.resumeCollect then
+				startCollect()
+				uiRefs.collect.set(State.autoCollect)
+			end
+
+			if State.resumeRoll or State.resumeCollect then
+				notify("▶ Resumed after rejoin", Config.good)
+			end
+		end)
+	end
 end
 
 ---This is called when initialization errors.
