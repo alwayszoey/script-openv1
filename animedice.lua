@@ -12,8 +12,9 @@ local AxionHub = {
 
 -- Constants.
 local HUB_NAME = "AxionHub_AutoDice"
-local HUB_VERSION = "v14"
+local HUB_VERSION = "v15"
 local WHITE = Color3.new(1, 1, 1)
+local SIDEBAR_WIDTH = 155
 
 -- Services.
 local playersService = game:GetService("Players")
@@ -26,26 +27,30 @@ local lighting = game:GetService("Lighting")
 local localPlayer = playersService.LocalPlayer
 
 local Config = {
-	-- Electric purple accent (logo X).
-	accent = Color3.fromRGB(157, 78, 221),
-	accentDim = Color3.fromRGB(104, 44, 168),
-	accentLight = Color3.fromRGB(199, 146, 245),
+	-- Neon purple accents.
+	accent = Color3.fromRGB(168, 85, 247),
+	accentDim = Color3.fromRGB(124, 58, 237),
+	accentLight = Color3.fromRGB(203, 160, 252),
+	accentGlow = Color3.fromRGB(255, 255, 255),
 
-	-- Obsidian panels.
-	bgTop = Color3.fromRGB(18, 8, 30),
-	bgBot = Color3.fromRGB(9, 4, 14),
-	sidebarTop = Color3.fromRGB(21, 10, 35),
-	sidebarBot = Color3.fromRGB(11, 5, 18),
-	card = Color3.fromRGB(27, 14, 44),
-	cardStroke = Color3.fromRGB(58, 34, 92),
+	-- Sidebar and content backgrounds.
+	sidebarTop = Color3.fromRGB(26, 10, 42),
+	sidebarBot = Color3.fromRGB(11, 4, 20),
+	bgTop = Color3.fromRGB(18, 5, 32),
+	bgBot = Color3.fromRGB(5, 1, 10),
+
+	-- Cards.
+	cardTop = Color3.fromRGB(56, 22, 96),
+	cardMid = Color3.fromRGB(40, 16, 72),
+	cardBot = Color3.fromRGB(18, 6, 36),
 
 	-- Inactive controls: dark solid purple-gray.
-	chipOff = Color3.fromRGB(46, 34, 70),
-	chipOffHover = Color3.fromRGB(62, 46, 94),
-	chipStroke = Color3.fromRGB(88, 64, 130),
+	slateTop = Color3.fromRGB(66, 52, 102),
+	slateBot = Color3.fromRGB(42, 32, 70),
+	slateStroke = Color3.fromRGB(120, 94, 172),
 
 	text = Color3.fromRGB(255, 255, 255),
-	textDim = Color3.fromRGB(220, 208, 242),
+	textDim = Color3.fromRGB(222, 210, 244),
 	muted = Color3.fromRGB(150, 130, 185),
 	good = Color3.fromRGB(130, 255, 180),
 	bad = Color3.fromRGB(255, 100, 130),
@@ -392,49 +397,62 @@ local function makeLabel(parent, text, size, position, font, textSize, color, al
 	return label
 end
 
+-- Card: gradient fill with a thin purple stroke.
 local function makeCard(parent, size, position)
 	local card = Instance.new("Frame")
 	card.Size = size
 	card.Position = position
-	card.BackgroundColor3 = Config.card
+	card.BackgroundColor3 = WHITE
 	card.BackgroundTransparency = 0.05
 	card.BorderSizePixel = 0
 	card.ZIndex = 3
 	card.Parent = parent
 	createCorner(card, 10)
-	createStroke(card, Config.cardStroke, 0.45, 1)
+
+	createGradient(
+		card,
+		90,
+		ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Config.cardTop),
+			ColorSequenceKeypoint.new(0.5, Config.cardMid),
+			ColorSequenceKeypoint.new(1, Config.cardBot),
+		})
+	)
+
+	createStroke(card, Config.accent, 0.6, 1)
 	return card
 end
 
--- Chip: flat button that tweens between dark and glowing purple.
-local function makeChip(button)
-	button.BackgroundColor3 = Config.chipOff
-	button.BackgroundTransparency = 0
+-- Chip: gradient button that swaps between slate and neon purple.
+local function makeChip(button, offTransparency)
+	button.BackgroundColor3 = WHITE
+	button.BackgroundTransparency = offTransparency or 0.1
 	button.TextColor3 = Config.textDim
 
 	return {
 		button = button,
 		on = false,
-		stroke = createStroke(button, Config.chipStroke, 0.4, 1),
+		offT = offTransparency or 0.1,
+		grad = createGradient(button, 90, ColorSequence.new(Config.slateTop, Config.slateBot)),
+		stroke = createStroke(button, Config.slateStroke, 0.35, 1),
 	}
 end
 
 local function refreshChip(chip, hover, instant)
-	local background
-	if chip.on then
-		background = hover and Config.accent:Lerp(WHITE, 0.12) or Config.accent
-	else
-		background = hover and Config.chipOffHover or Config.chipOff
-	end
+	local baseT = chip.on and 0 or chip.offT
+	local bgT = hover and math.max(baseT - 0.1, 0) or baseT
+
+	chip.grad.Color = chip.on and ColorSequence.new(Config.accent, Config.accentDim)
+		or ColorSequence.new(Config.slateTop, Config.slateBot)
 
 	local buttonGoal = {
-		BackgroundColor3 = background,
+		BackgroundTransparency = bgT,
 		TextColor3 = chip.on and Config.text or Config.textDim,
 	}
 
 	local strokeGoal = {
-		Color = chip.on and Config.accentLight or Config.chipStroke,
-		Transparency = (chip.on and 0) or (hover and 0.15 or 0.4),
+		Color = chip.on and Config.accentLight or Config.slateStroke,
+		Transparency = (hover and 0) or (chip.on and 0.05 or 0.35),
 	}
 
 	if instant then
@@ -466,6 +484,32 @@ local function addHover(chip)
 	end))
 end
 
+-- Glossy white shine at the top-left of a toggle pill.
+local function makeToggleGlow(parent)
+	local highlight = Instance.new("Frame")
+	highlight.Size = UDim2.new(0.6, 0, 0.6, 0)
+	highlight.Position = UDim2.new(0, 0, 0, 0)
+	highlight.BackgroundColor3 = Config.accentGlow
+	highlight.BackgroundTransparency = 0.35
+	highlight.BorderSizePixel = 0
+	highlight.ZIndex = 2
+	highlight.Parent = parent
+	createCorner(highlight, 999)
+
+	createGradient(
+		highlight,
+		135,
+		nil,
+		NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.2),
+			NumberSequenceKeypoint.new(0.6, 1),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+	)
+
+	return highlight
+end
+
 -- Pill toggle (fixed 46x24 with 18px knob so every toggle matches).
 local PILL_SIZE = UDim2.new(0, 46, 0, 24)
 local KNOB_SIZE = UDim2.new(0, 18, 0, 18)
@@ -475,7 +519,7 @@ local function buildPill(parent, position)
 	local pill = Instance.new("TextButton")
 	pill.Size = PILL_SIZE
 	pill.Position = position
-	pill.BackgroundColor3 = Config.chipOff
+	pill.BackgroundColor3 = WHITE
 	pill.BorderSizePixel = 0
 	pill.Text = ""
 	pill.AutoButtonColor = false
@@ -483,31 +527,36 @@ local function buildPill(parent, position)
 	pill.Parent = parent
 	createCorner(pill, 999)
 
+	local parts = {
+		pill = pill,
+		grad = createGradient(pill, 0, ColorSequence.new(Config.slateTop, Config.slateBot)),
+		stroke = createStroke(pill, Config.slateStroke, 0.3, 1),
+		glow = makeToggleGlow(pill),
+		offPos = UDim2.new(0, KNOB_PAD, 0.5, -9),
+		onPos = UDim2.new(1, -(18 + KNOB_PAD), 0.5, -9),
+	}
+
 	local knob = Instance.new("Frame")
 	knob.Size = KNOB_SIZE
+	knob.Position = parts.offPos
 	knob.BackgroundColor3 = Config.textDim
 	knob.BorderSizePixel = 0
 	knob.ZIndex = 6
 	knob.Parent = pill
 	createCorner(knob, 999)
+	parts.knob = knob
 
-	local parts = {
-		pill = pill,
-		knob = knob,
-		stroke = createStroke(pill, Config.chipStroke, 0.3, 1),
-		offPos = UDim2.new(0, KNOB_PAD, 0.5, -9),
-		onPos = UDim2.new(1, -(18 + KNOB_PAD), 0.5, -9),
-	}
-
-	knob.Position = parts.offPos
 	return parts
 end
 
 local function stylePill(parts, on, instant)
-	local pillGoal = { BackgroundColor3 = on and Config.accent or Config.chipOff }
+	parts.grad.Color = on and ColorSequence.new(Config.accent, Config.accentDim)
+		or ColorSequence.new(Config.slateTop, Config.slateBot)
+	parts.glow.Visible = on
+
 	local strokeGoal = {
-		Color = on and Config.accentLight or Config.chipStroke,
-		Transparency = on and 0 or 0.3,
+		Color = on and Config.accentLight or Config.slateStroke,
+		Transparency = on and 0.05 or 0.3,
 	}
 	local knobGoal = {
 		Position = on and parts.onPos or parts.offPos,
@@ -515,9 +564,6 @@ local function stylePill(parts, on, instant)
 	}
 
 	if instant then
-		for property, value in pairs(pillGoal) do
-			parts.pill[property] = value
-		end
 		for property, value in pairs(strokeGoal) do
 			parts.stroke[property] = value
 		end
@@ -527,9 +573,8 @@ local function stylePill(parts, on, instant)
 		return
 	end
 
-	tween(parts.pill, 0.2, pillGoal)
 	tween(parts.stroke, 0.2, strokeGoal)
-	tween(parts.knob, 0.2, knobGoal)
+	tween(parts.knob, 0.22, knobGoal)
 end
 
 local function makeToggle(parent, y, title, defaultOn, callback)
@@ -584,7 +629,8 @@ local function buildUI()
 	miniBtn.Name = "MiniBtn"
 	miniBtn.Size = UDim2.new(0, 48, 0, 48)
 	miniBtn.Position = UDim2.new(0, 20, 0, 100)
-	miniBtn.BackgroundColor3 = Config.accent
+	miniBtn.BackgroundColor3 = WHITE
+	miniBtn.BackgroundTransparency = 0.05
 	miniBtn.BorderSizePixel = 0
 	miniBtn.Text = ""
 	miniBtn.AutoButtonColor = false
@@ -593,11 +639,12 @@ local function buildUI()
 	miniBtn.Draggable = true
 	miniBtn.Parent = gui
 	createCorner(miniBtn, 12)
+	createGradient(miniBtn, 90, ColorSequence.new(Config.accent, Config.accentDim))
 	createStroke(miniBtn, Config.accentLight, 0.2, 1.5)
 
 	makeLabel(miniBtn, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 22, Config.text, Enum.TextXAlignment.Center)
 
-	-- Transparent shell, sidebar and content are separate panels.
+	-- One window holds the sidebar and content side by side.
 	local win = Instance.new("Frame")
 	win.Name = "Window"
 	win.Size = UDim2.new(0, 580, 0, 400)
@@ -605,35 +652,38 @@ local function buildUI()
 	win.BackgroundTransparency = 1
 	win.BorderSizePixel = 0
 	win.Active = true
-	win.ClipsDescendants = false
+	win.ClipsDescendants = true
 	win.Parent = gui
+	createCorner(win, 14)
+	createStroke(win, Config.accent, 0.6, 1)
 
 	-- Sidebar.
 	local sidebar = Instance.new("Frame")
-	sidebar.Size = UDim2.new(0, 155, 1, 0)
+	sidebar.Size = UDim2.new(0, SIDEBAR_WIDTH, 1, 0)
 	sidebar.BackgroundColor3 = WHITE
-	sidebar.BackgroundTransparency = 0.06
+	sidebar.BackgroundTransparency = 0.35
 	sidebar.BorderSizePixel = 0
 	sidebar.Parent = win
-	createCorner(sidebar, 14)
 	createGradient(sidebar, 90, ColorSequence.new(Config.sidebarTop, Config.sidebarBot))
-	createStroke(sidebar, Config.cardStroke, 0.35, 1)
+	createStroke(sidebar, Config.accent, 0.6, 1)
 
 	local logoBox = Instance.new("Frame")
 	logoBox.Size = UDim2.new(0, 44, 0, 44)
 	logoBox.Position = UDim2.new(0, 18, 0, 18)
 	logoBox.BackgroundColor3 = WHITE
+	logoBox.BackgroundTransparency = 0.05
 	logoBox.BorderSizePixel = 0
 	logoBox.ZIndex = 3
 	logoBox.Parent = sidebar
-	createCorner(logoBox, 10)
+	createCorner(logoBox, 12)
 	createGradient(logoBox, 135, ColorSequence.new(Config.accent, Config.accentDim))
+	createStroke(logoBox, Config.accentLight, 0.3, 1)
 
 	makeLabel(logoBox, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 22, Config.text, Enum.TextXAlignment.Center)
 
 	makeLabel(sidebar, "AxionHub", UDim2.new(1, -20, 0, 18), UDim2.new(0, 18, 0, 70), Config.fontBold, 15, Config.text)
 
-	makeLabel(sidebar, "AutoDice  " .. HUB_VERSION, UDim2.new(1, -20, 0, 14), UDim2.new(0, 18, 0, 88), Config.font, 10, Config.muted)
+	makeLabel(sidebar, "AutoDice  " .. HUB_VERSION, UDim2.new(1, -20, 0, 14), UDim2.new(0, 18, 0, 88), Config.font, 10, Config.textDim)
 
 	local pages = {
 		{ id = "MAIN", icon = "🏠", label = "Main", desc = "dice & collect" },
@@ -653,17 +703,19 @@ local function buildUI()
 		button.Parent = sidebar
 		createCorner(button, 10)
 
-		local chip = makeChip(button)
+		local chip = makeChip(button, 0.35)
 		addHover(chip)
 
 		local badge = Instance.new("Frame")
 		badge.Size = UDim2.new(0, 28, 0, 28)
 		badge.Position = UDim2.new(0, 8, 0.5, -14)
-		badge.BackgroundColor3 = Config.bgBot
+		badge.BackgroundColor3 = Config.cardMid
+		badge.BackgroundTransparency = 0.1
 		badge.BorderSizePixel = 0
 		badge.ZIndex = 4
 		badge.Parent = button
 		createCorner(badge, 8)
+		createStroke(badge, Config.accent, 0.6, 1)
 
 		makeLabel(badge, page.icon, UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 14, Config.accentLight, Enum.TextXAlignment.Center)
 
@@ -678,17 +730,16 @@ local function buildUI()
 		}
 	end
 
-	-- Content panel.
+	-- Content panel sits directly against the sidebar.
 	local content = Instance.new("Frame")
-	content.Size = UDim2.new(1, -163, 1, 0)
-	content.Position = UDim2.new(0, 163, 0, 0)
+	content.Size = UDim2.new(1, -SIDEBAR_WIDTH, 1, 0)
+	content.Position = UDim2.new(0, SIDEBAR_WIDTH, 0, 0)
 	content.BackgroundColor3 = WHITE
-	content.BackgroundTransparency = 0.06
+	content.BackgroundTransparency = 0.2
 	content.BorderSizePixel = 0
 	content.Parent = win
-	createCorner(content, 14)
 	createGradient(content, 90, ColorSequence.new(Config.bgTop, Config.bgBot))
-	createStroke(content, Config.cardStroke, 0.35, 1)
+	createStroke(content, Config.accent, 0.6, 1)
 
 	-- Main page.
 	local mainPage = Instance.new("Frame")
@@ -749,7 +800,7 @@ local function buildUI()
 		button.Parent = modeCard
 		createCorner(button, 8)
 
-		local chip = makeChip(button)
+		local chip = makeChip(button, 0.1)
 		modeChips[mode] = chip
 		addHover(chip)
 
@@ -759,10 +810,9 @@ local function buildUI()
 		end))
 	end
 
-	for _, chip in pairs(modeChips) do
-		styleChip(chip, false, true)
+	for key, chip in pairs(modeChips) do
+		styleChip(chip, key == State.mode, true)
 	end
-	styleChip(modeChips[State.mode], true, true)
 
 	-- Same toggle builder as AFK Collect so both switches match.
 	local autoRollToggle
@@ -783,24 +833,24 @@ local function buildUI()
 
 	local speedValue = makeLabel(speedCard, "33 / sec", UDim2.new(0.5, -14, 0, 14), UDim2.new(0.5, 0, 0, 8), Config.fontBold, 11, Config.text, Enum.TextXAlignment.Right)
 
-	local track_ = Instance.new("TextButton")
-	track_.Size = UDim2.new(1, -28, 0, 10)
-	track_.Position = UDim2.new(0, 14, 0, 36)
-	track_.BackgroundColor3 = Config.bgBot
-	track_.BorderSizePixel = 0
-	track_.Text = ""
-	track_.AutoButtonColor = false
-	track_.ZIndex = 4
-	track_.Parent = speedCard
-	createCorner(track_, 999)
-	createStroke(track_, Config.chipStroke, 0.5, 1)
+	local sliderTrack = Instance.new("TextButton")
+	sliderTrack.Size = UDim2.new(1, -28, 0, 10)
+	sliderTrack.Position = UDim2.new(0, 14, 0, 36)
+	sliderTrack.BackgroundColor3 = Config.bgBot
+	sliderTrack.BorderSizePixel = 0
+	sliderTrack.Text = ""
+	sliderTrack.AutoButtonColor = false
+	sliderTrack.ZIndex = 4
+	sliderTrack.Parent = speedCard
+	createCorner(sliderTrack, 999)
+	createStroke(sliderTrack, Config.slateStroke, 0.5, 1)
 
 	local fill = Instance.new("Frame")
 	fill.Size = UDim2.new(0.5, 0, 1, 0)
 	fill.BackgroundColor3 = WHITE
 	fill.BorderSizePixel = 0
 	fill.ZIndex = 5
-	fill.Parent = track_
+	fill.Parent = sliderTrack
 	createCorner(fill, 999)
 	createGradient(fill, 0, ColorSequence.new(Config.accentDim, Config.accent))
 
@@ -810,7 +860,7 @@ local function buildUI()
 	sliderKnob.BackgroundColor3 = Config.accentLight
 	sliderKnob.BorderSizePixel = 0
 	sliderKnob.ZIndex = 6
-	sliderKnob.Parent = track_
+	sliderKnob.Parent = sliderTrack
 	createCorner(sliderKnob, 999)
 	createStroke(sliderKnob, Config.accent, 0.4, 3)
 
@@ -826,7 +876,7 @@ local function buildUI()
 	end
 
 	local function setFromX(x)
-		applyRelative(math.clamp((x - track_.AbsolutePosition.X) / track_.AbsoluteSize.X, 0, 1))
+		applyRelative(math.clamp((x - sliderTrack.AbsolutePosition.X) / sliderTrack.AbsoluteSize.X, 0, 1))
 	end
 
 	-- Match the slider to the default spam speed.
@@ -835,7 +885,7 @@ local function buildUI()
 	sliderKnob.Position = UDim2.new((initialRate - 20) / 180, -7, 0.5, -7)
 	speedValue.Text = initialRate .. " / sec"
 
-	track(track_.InputBegan:Connect(function(input)
+	track(sliderTrack.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			draggingSlider = true
 			setFromX(input.Position.X)
@@ -926,7 +976,7 @@ local function buildUI()
 		button.Parent = rangeCard
 		createCorner(button, 8)
 
-		local chip = makeChip(button)
+		local chip = makeChip(button, 0.1)
 		rangeChips[value] = chip
 		addHover(chip)
 
@@ -942,10 +992,9 @@ local function buildUI()
 	makeRangeButton("1 → 8", 72, 8)
 	makeRangeButton("1 → 16", 130, 16)
 
-	for _, chip in pairs(rangeChips) do
-		styleChip(chip, false, true)
+	for value, chip in pairs(rangeChips) do
+		styleChip(chip, State.plotMax == value, true)
 	end
-	styleChip(rangeChips[State.plotMax] or rangeChips[16], true, true)
 
 	-- Page switching.
 	local function applyPage(instant)
@@ -977,17 +1026,16 @@ local function buildUI()
 
 	local minBtn = Instance.new("TextButton")
 	minBtn.Size = UDim2.new(0, 22, 0, 22)
-	minBtn.BackgroundColor3 = Config.chipOff
 	minBtn.BorderSizePixel = 0
 	minBtn.Text = "—"
 	minBtn.Font = Config.fontBold
 	minBtn.TextSize = 14
-	minBtn.TextColor3 = Config.text
 	minBtn.AutoButtonColor = false
 	minBtn.ZIndex = 11
 	minBtn.Parent = topButtons
 	createCorner(minBtn, 999)
-	local minChip = { button = minBtn, on = false, stroke = createStroke(minBtn, Config.chipStroke, 0.4, 1) }
+	local minChip = makeChip(minBtn, 0.1)
+	styleChip(minChip, false, true)
 	addHover(minChip)
 
 	local closeBtn = Instance.new("TextButton")
