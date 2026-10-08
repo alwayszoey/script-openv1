@@ -1,8 +1,3 @@
---[[
-    AxionHub AutoDice v11.1
-    Hotfix: UI ไม่ขึ้น / blur ค้าง
---]]
-
 local Services = {
     Players = game:GetService("Players"),
     ReplicatedStorage = game:GetService("ReplicatedStorage"),
@@ -17,44 +12,66 @@ local RS = Services.ReplicatedStorage
 local Tween = Services.TweenService
 local UIS = Services.UserInputService
 local Lighting = Services.Lighting
+local RunService = Services.RunService
 
 local Config = {
     Name = "AxionHub_AutoDice",
-    Version = "v11.1",
+    Version = "v12",
+
     Accent = Color3.fromRGB(168, 85, 247),
     AccentDim = Color3.fromRGB(124, 58, 237),
     AccentLight = Color3.fromRGB(222, 192, 255),
+
     BgTop = Color3.fromRGB(14, 4, 26),
     BgBot = Color3.fromRGB(0, 0, 0),
+
     CardTop = Color3.fromRGB(56, 22, 96),
     CardMid = Color3.fromRGB(34, 12, 64),
     CardBot = Color3.fromRGB(18, 6, 36),
+
     SidebarTop = Color3.fromRGB(62, 24, 108),
     SidebarBot = Color3.fromRGB(28, 10, 52),
+
     ToggleOff = Color3.fromRGB(22, 8, 42),
     ToggleOn = Color3.fromRGB(168, 85, 247),
+
     Text = Color3.fromRGB(248, 244, 255),
     TextDim = Color3.fromRGB(200, 180, 235),
     Muted = Color3.fromRGB(140, 118, 178),
     Good = Color3.fromRGB(130, 255, 180),
     Bad = Color3.fromRGB(255, 100, 130),
-    Gold = Color3.fromRGB(255, 200, 80),
+
     Font = Enum.Font.Gotham,
     FontBold = Enum.Font.GothamBold,
     FontMedium = Enum.Font.GothamMedium,
+
+    BlurSize = 8,
 }
 
 local State = {
-    page = "MAIN", mode = "AUTO", running = false, rolls = 0,
-    autoRollOn = false, thread = nil, spamSpeed = 0.03,
-    bypassAnim = true, killCutscene = true,
-    autoCollect = false, collectThread = nil,
-    collectRate = 0.5, plotMin = 1, plotMax = 16,
-    collected = 0, lastPlot = 0, collectStarted = false,
-    minimized = false,
+    Page = "MAIN",
+    Mode = "AUTO",
+    Running = false,
+    Rolls = 0,
+    AutoRollOn = false,
+    DiceThread = nil,
+    SpamSpeed = 0.03,
+    BypassAnim = true,
+    KillCutscene = true,
+
+    AutoCollect = false,
+    CollectThread = nil,
+    CollectRate = 0.5,
+    PlotMin = 1,
+    PlotMax = 16,
+    Collected = 0,
+    LastPlot = 0,
+    CollectStarted = false,
+
+    Minimized = false,
 }
 
-local function getSafeParent()
+local function SafeParent()
     if type(gethui) == "function" then
         local ok, h = pcall(gethui)
         if ok and h then return h end
@@ -62,7 +79,7 @@ local function getSafeParent()
     return game:GetService("CoreGui")
 end
 
-local function safeFind(root, ...)
+local function SafeFind(root, ...)
     local node = root
     for _, name in ipairs({...}) do
         if not node then return nil end
@@ -74,34 +91,34 @@ local function safeFind(root, ...)
 end
 
 local Remotes = {
-    RollDice = safeFind(RS, "Network", "RollService", "RF", "RollDice"),
-    SetAutoRoll = safeFind(RS, "Network", "RollService", "RE", "SetAutoRoll"),
-    RollMessage = safeFind(RS, "Network", "RollService", "RE", "RollMessage"),
-    CollectBalance = safeFind(RS, "Network", "PlotService", "RE", "CollectBalance"),
+    RollDice = SafeFind(RS, "Network", "RollService", "RF", "RollDice"),
+    SetAutoRoll = SafeFind(RS, "Network", "RollService", "RE", "SetAutoRoll"),
+    RollMessage = SafeFind(RS, "Network", "RollService", "RE", "RollMessage"),
+    CollectBalance = SafeFind(RS, "Network", "PlotService", "RE", "CollectBalance"),
 }
 
-local remotesReady = Remotes.RollDice ~= nil and Remotes.SetAutoRoll ~= nil
-local collectReady = Remotes.CollectBalance ~= nil
+local RemotesReady = Remotes.RollDice ~= nil and Remotes.SetAutoRoll ~= nil
+local CollectReady = Remotes.CollectBalance ~= nil
 
-local antiFX = { camModel = nil, cutscene = nil, rollingDir = nil, ccEffects = {} }
+local AntiFX = { CamModel = nil, Cutscene = nil, RollingDir = nil, CCEffects = {} }
 
-local function initAntiFX()
-    local rolling = safeFind(RS, "Framework", "Features", "Rolling")
+local function InitAntiFX()
+    local rolling = SafeFind(RS, "Framework", "Features", "Rolling")
     if rolling then
-        antiFX.cutscene = rolling:FindFirstChild("RollCutscene")
-        if antiFX.cutscene then
-            antiFX.camModel = antiFX.cutscene:FindFirstChild("CameraModel")
+        AntiFX.Cutscene = rolling:FindFirstChild("RollCutscene")
+        if AntiFX.Cutscene then
+            AntiFX.CamModel = AntiFX.Cutscene:FindFirstChild("CameraModel")
         end
     end
 
-    antiFX.ccEffects = {}
+    AntiFX.CCEffects = {}
     for _, name in ipairs({
         "VFXImpactFrameWhite", "WhiteImpactFrame",
-        "BlackImpactFrame", "VFXImpactFrameBlack"
+        "BlackImpactFrame", "VFXImpactFrameBlack",
     }) do
         local fx = Lighting:FindFirstChild(name)
         if fx and fx:IsA("PostEffect") then
-            antiFX.ccEffects[#antiFX.ccEffects + 1] = fx
+            table.insert(AntiFX.CCEffects, fx)
         end
     end
 
@@ -109,29 +126,33 @@ local function initAntiFX()
     if pg then
         local root = pg:FindFirstChild("Root")
         if root then
-            antiFX.rollingDir = root:FindFirstChild("Rolling")
+            AntiFX.RollingDir = root:FindFirstChild("Rolling")
         end
     end
 
-    if antiFX.cutscene then
-        local lines = antiFX.cutscene:FindFirstChild("lines")
+    if AntiFX.Cutscene then
+        local lines = AntiFX.Cutscene:FindFirstChild("lines")
         if lines then pcall(function() lines:Destroy() end) end
-        for _, s in ipairs(antiFX.cutscene:GetChildren()) do
+        for _, s in ipairs(AntiFX.Cutscene:GetChildren()) do
             if s:IsA("Sound") then
-                pcall(function() s.Volume = 0; s:Stop() end)
+                pcall(function()
+                    s.Volume = 0
+                    s:Stop()
+                end)
             end
         end
     end
 end
 
-local function tickAntiFX()
-    if not State.bypassAnim then return end
-    if State.killCutscene and antiFX.camModel then
+local function TickAntiFX()
+    if not State.BypassAnim then return end
+
+    if State.KillCutscene and AntiFX.CamModel then
         pcall(function()
-            antiFX.camModel.Transparency = 1
-            antiFX.camModel.CanCollide = false
-            antiFX.camModel.Anchored = true
-            for _, p in ipairs(antiFX.camModel:GetDescendants()) do
+            AntiFX.CamModel.Transparency = 1
+            AntiFX.CamModel.CanCollide = false
+            AntiFX.CamModel.Anchored = true
+            for _, p in ipairs(AntiFX.CamModel:GetDescendants()) do
                 if p:IsA("BasePart") then
                     p.Transparency = 1
                     p.CanCollide = false
@@ -139,68 +160,70 @@ local function tickAntiFX()
             end
         end)
     end
-    for _, fx in ipairs(antiFX.ccEffects) do
+
+    for _, fx in ipairs(AntiFX.CCEffects) do
         if fx.Parent and fx.Enabled then fx.Enabled = false end
     end
-    if antiFX.rollingDir and antiFX.rollingDir.Parent then
-        if antiFX.rollingDir.Visible then antiFX.rollingDir.Visible = false end
-        for _, c in ipairs(antiFX.rollingDir:GetChildren()) do
+
+    if AntiFX.RollingDir and AntiFX.RollingDir.Parent then
+        if AntiFX.RollingDir.Visible then AntiFX.RollingDir.Visible = false end
+        for _, c in ipairs(AntiFX.RollingDir:GetChildren()) do
             if c:IsA("GuiObject") and c.Visible then c.Visible = false end
         end
     end
 end
 
-initAntiFX()
+InitAntiFX()
 task.spawn(function()
     while true do
         task.wait(2)
-        initAntiFX()
+        InitAntiFX()
     end
 end)
-Services.RunService.Heartbeat:Connect(tickAntiFX)
+RunService.Heartbeat:Connect(TickAntiFX)
 
-local function doRoll()
-    if not Remotes.RollDice then return false end
+local function DoRoll()
+    if not Remotes.RollDice then return end
     local ok = pcall(function() Remotes.RollDice:InvokeServer() end)
-    if ok then State.rolls = State.rolls + 1 end
-    if (State.mode == "AUTO" or State.mode == "BOTH")
-        and not State.autoRollOn and Remotes.SetAutoRoll then
+    if ok then State.Rolls = State.Rolls + 1 end
+
+    if (State.Mode == "AUTO" or State.Mode == "BOTH")
+        and not State.AutoRollOn and Remotes.SetAutoRoll then
         pcall(function()
             Remotes.SetAutoRoll:FireServer(true)
-            State.autoRollOn = true
+            State.AutoRollOn = true
         end)
     end
-    return ok
 end
 
-local function diceLoop()
-    State.running = true
-    while State.running do
-        if State.mode == "SPAM" or State.mode == "BOTH" then
-            doRoll()
-        elseif State.mode == "AUTO" then
-            if not State.autoRollOn and Remotes.SetAutoRoll then
+local function DiceLoop()
+    State.Running = true
+    while State.Running do
+        if State.Mode == "SPAM" or State.Mode == "BOTH" then
+            DoRoll()
+        elseif State.Mode == "AUTO" then
+            if not State.AutoRollOn and Remotes.SetAutoRoll then
                 pcall(function()
                     Remotes.SetAutoRoll:FireServer(true)
-                    State.autoRollOn = true
+                    State.AutoRollOn = true
                 end)
             end
         end
-        task.wait(State.spamSpeed)
+        task.wait(State.SpamSpeed)
     end
 end
 
-local function startDice()
-    if State.running or not remotesReady then return end
-    State.thread = task.spawn(diceLoop)
+local function StartDice()
+    if State.Running or not RemotesReady then return end
+    State.DiceThread = task.spawn(DiceLoop)
 end
 
-local function stopDice()
-    State.running = false
-    if State.thread then pcall(task.cancel, State.thread) end
-    if State.autoRollOn and Remotes.SetAutoRoll then
+local function StopDice()
+    State.Running = false
+    if State.DiceThread then pcall(task.cancel, State.DiceThread) end
+    if State.AutoRollOn and Remotes.SetAutoRoll then
         pcall(function() Remotes.SetAutoRoll:FireServer(false) end)
-        State.autoRollOn = false
+        State.AutoRollOn = false
     end
 end
 
@@ -208,49 +231,189 @@ if Remotes.RollMessage then
     Remotes.RollMessage.OnClientEvent:Connect(function() end)
 end
 
-local function collectOnePlot(plotNum)
+local function CollectOnePlot(plotNum)
     if not Remotes.CollectBalance then return end
     pcall(function() Remotes.CollectBalance:FireServer(plotNum) end)
-    State.collected = State.collected + 1
-    State.lastPlot = plotNum
+    State.Collected = State.Collected + 1
+    State.LastPlot = plotNum
 end
 
-local function collectLoop()
-    while State.autoCollect do
-        for plotNum = State.plotMin, State.plotMax do
-            if not State.autoCollect then break end
-            collectOnePlot(plotNum)
+local function CollectLoop()
+    while State.AutoCollect do
+        for plotNum = State.PlotMin, State.PlotMax do
+            if not State.AutoCollect then break end
+            CollectOnePlot(plotNum)
             task.wait(0.04)
         end
-        task.wait(State.collectRate)
+        task.wait(State.CollectRate)
     end
 end
 
-local function startCollect()
-    if State.collectThread or not collectReady then return end
-    State.autoCollect = true
-    State.collectStarted = true
-    State.collectThread = task.spawn(collectLoop)
+local function StartCollect()
+    if State.CollectThread or not CollectReady then return end
+    State.AutoCollect = true
+    State.CollectStarted = true
+    State.CollectThread = task.spawn(CollectLoop)
 end
 
-local function stopCollect()
-    State.autoCollect = false
-    State.collectStarted = false
-    if State.collectThread then
-        pcall(task.cancel, State.collectThread)
-        State.collectThread = nil
+local function StopCollect()
+    State.AutoCollect = false
+    State.CollectStarted = false
+    if State.CollectThread then
+        pcall(task.cancel, State.CollectThread)
+        State.CollectThread = nil
     end
 end
 
 LP.CharacterAdded:Connect(function()
     task.wait(2)
-    if State.collectStarted and not State.autoCollect then
-        startCollect()
+    if State.CollectStarted and not State.AutoCollect then
+        StartCollect()
     end
 end)
 
-local function buildUI()
-    local parent = getSafeParent()
+local function CreateCorner(parent, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius)
+    c.Parent = parent
+    return c
+end
+
+local function CreateGradient(parent, rotation, colorSeq, transpSeq)
+    local g = Instance.new("UIGradient")
+    g.Rotation = rotation or 90
+    if colorSeq then g.Color = colorSeq end
+    if transpSeq then g.Transparency = transpSeq end
+    g.Parent = parent
+    return g
+end
+
+local function MakeToggleGlow(parent)
+    local hl = Instance.new("Frame")
+    hl.Size = UDim2.new(0.6, 0, 0.6, 0)
+    hl.Position = UDim2.new(0, 0, 0, 0)
+    hl.BackgroundColor3 = Color3.fromRGB(255, 240, 255)
+    hl.BackgroundTransparency = 0.35
+    hl.BorderSizePixel = 0
+    hl.ZIndex = 2
+    hl.Parent = parent
+    CreateCorner(hl, 999)
+
+    local g = Instance.new("UIGradient", hl)
+    g.Rotation = 135
+    g.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0.0, 0.25),
+        NumberSequenceKeypoint.new(0.6, 1.0),
+        NumberSequenceKeypoint.new(1.0, 1.0),
+    })
+    g.Parent = hl
+end
+
+local function MakeLabel(parent, text, size, pos, font, textSize, color, align)
+    local l = Instance.new("TextLabel")
+    l.Text = text
+    l.Size = size
+    l.Position = pos
+    l.Font = font or Config.Font
+    l.TextSize = textSize or 11
+    l.TextColor3 = color or Config.Text
+    l.BackgroundTransparency = 1
+    l.TextXAlignment = align or Enum.TextXAlignment.Left
+    l.ZIndex = 5
+    l.Parent = parent
+    return l
+end
+
+local function MakeCard(parent, size, pos)
+    local c = Instance.new("Frame")
+    c.Size = size
+    c.Position = pos
+    c.BackgroundColor3 = Config.CardMid
+    c.BorderSizePixel = 0
+    c.ZIndex = 3
+    c.Parent = parent
+    CreateCorner(c, 10)
+
+    local g = Instance.new("UIGradient", c)
+    g.Rotation = 90
+    g.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0.00, Config.CardTop),
+        ColorSequenceKeypoint.new(0.55, Config.CardMid),
+        ColorSequenceKeypoint.new(1.00, Config.CardBot),
+    })
+    g.Parent = c
+    return c
+end
+
+local function MakeToggle(parent, y, title, defaultOn, callback)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 40)
+    row.Position = UDim2.new(0, 0, 0, y)
+    row.BackgroundTransparency = 1
+    row.ZIndex = 4
+    row.Parent = parent
+
+    MakeLabel(row, title, UDim2.new(0.75, 0, 1, 0), UDim2.new(0, 14, 0, 0),
+        Config.FontMedium, 11.5, Config.Text)
+
+    local pill = Instance.new("TextButton")
+    pill.Size = UDim2.new(0, 46, 0, 24)
+    pill.Position = UDim2.new(1, -60, 0.5, -12)
+    pill.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
+    pill.Text = ""
+    pill.AutoButtonColor = false
+    pill.ZIndex = 5
+    pill.Parent = row
+    CreateCorner(pill, 999)
+
+    local pillGrad = Instance.new("UIGradient", pill)
+    pillGrad.Rotation = 0
+    pillGrad.Color = defaultOn
+        and ColorSequence.new(Config.ToggleOn, Config.AccentDim)
+        or ColorSequence.new(Config.ToggleOff, Config.ToggleOff)
+    pillGrad.Parent = pill
+
+    MakeToggleGlow(pill)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 18, 0, 18)
+    knob.Position = defaultOn
+        and UDim2.new(1, -21, 0.5, -9)
+        or UDim2.new(0, 3, 0.5, -9)
+    knob.BackgroundColor3 = Color3.new(1, 1, 1)
+    knob.BorderSizePixel = 0
+    knob.ZIndex = 6
+    knob.Parent = pill
+    CreateCorner(knob, 999)
+
+    local on = defaultOn
+    local function Update()
+        pillGrad.Color = on
+            and ColorSequence.new(Config.ToggleOn, Config.AccentDim)
+            or ColorSequence.new(Config.ToggleOff, Config.ToggleOff)
+        Tween:Create(knob, TweenInfo.new(0.22), {
+            Position = on
+                and UDim2.new(1, -21, 0.5, -9)
+                or UDim2.new(0, 3, 0.5, -9),
+        }):Play()
+    end
+
+    pill.MouseButton1Click:Connect(function()
+        on = not on
+        Update()
+        if callback then callback(on) end
+    end)
+
+    return {
+        Set = function(v)
+            on = v
+            Update()
+        end,
+    }
+end
+
+local function BuildUI()
+    local parent = SafeParent()
     local old = parent:FindFirstChild(Config.Name)
     if old then old:Destroy() end
 
@@ -261,124 +424,6 @@ local function buildUI()
     gui.IgnoreGuiInset = true
     gui.DisplayOrder = 999
     gui.Parent = parent
-
-    local function corner(parent, r)
-        local c = Instance.new("UICorner", parent)
-        c.CornerRadius = UDim.new(0, r)
-        return c
-    end
-
-    local function gradient(parent, rot, colors)
-        local g = Instance.new("UIGradient", parent)
-        g.Rotation = rot or 90
-        if colors then
-            g.Color = ColorSequence.new(colors)
-        end
-        return g
-    end
-
-    local function toggleGlow(parent)
-        local hl = Instance.new("Frame", parent)
-        hl.Size = UDim2.new(0.6, 0, 0.6, 0)
-        hl.Position = UDim2.new(0, 0, 0, 0)
-        hl.BackgroundColor3 = Color3.fromRGB(255, 240, 255)
-        hl.BackgroundTransparency = 0.35
-        hl.BorderSizePixel = 0
-        hl.ZIndex = 2
-        corner(hl, 999)
-        local g = Instance.new("UIGradient", hl)
-        g.Rotation = 135
-        g.Transparency = NumberSequence.new{
-            NumberSequenceKeypoint.new(0.0, 0.25),
-            NumberSequenceKeypoint.new(0.6, 1.0),
-            NumberSequenceKeypoint.new(1.0, 1.0),
-        }
-        return hl
-    end
-
-    local function label(parent, text, size, pos, font, ts, color, align)
-        local l = Instance.new("TextLabel", parent)
-        l.Text = text
-        l.Size = size
-        l.Position = pos
-        l.Font = font or Config.Font
-        l.TextSize = ts or 11
-        l.TextColor3 = color or Config.Text
-        l.BackgroundTransparency = 1
-        l.TextXAlignment = align or Enum.TextXAlignment.Left
-        l.ZIndex = 5
-        return l
-    end
-
-    local function card(parent, size, pos)
-        local c = Instance.new("Frame")
-        c.Size = size
-        c.Position = pos
-        c.BackgroundColor3 = Config.CardMid
-        c.BorderSizePixel = 0
-        c.ZIndex = 3
-        c.Parent = parent
-        corner(c, 10)
-        gradient(c, 90, {
-            ColorSequenceKeypoint.new(0.00, Config.CardTop),
-            ColorSequenceKeypoint.new(0.55, Config.CardMid),
-            ColorSequenceKeypoint.new(1.00, Config.CardBot),
-        })
-        return c
-    end
-
-    local function makeToggle(parent, y, title, defaultOn, cb)
-        local row = Instance.new("Frame", parent)
-        row.Size = UDim2.new(1, 0, 0, 40)
-        row.Position = UDim2.new(0, 0, 0, y)
-        row.BackgroundTransparency = 1
-        row.ZIndex = 4
-
-        label(row, title, UDim2.new(0.75, 0, 1, 0), UDim2.new(0, 14, 0, 0),
-            Config.FontMedium, 11.5, Config.Text)
-
-        local pill = Instance.new("TextButton", row)
-        pill.Size = UDim2.new(0, 46, 0, 24)
-        pill.Position = UDim2.new(1, -60, 0.5, -12)
-        pill.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
-        pill.Text = ""
-        pill.AutoButtonColor = false
-        pill.ZIndex = 5
-        corner(pill, 999)
-
-        local pillGrad = gradient(pill, 0)
-        pillGrad.Color = defaultOn and ColorSequence.new(Config.ToggleOn, Config.AccentDim)
-            or ColorSequence.new(Config.ToggleOff, Config.ToggleOff)
-
-        toggleGlow(pill)
-
-        local knob = Instance.new("Frame", pill)
-        knob.Size = UDim2.new(0, 18, 0, 18)
-        knob.Position = defaultOn and UDim2.new(1, -21, 0.5, -9)
-            or UDim2.new(0, 3, 0.5, -9)
-        knob.BackgroundColor3 = Color3.new(1, 1, 1)
-        knob.BorderSizePixel = 0
-        knob.ZIndex = 6
-        corner(knob, 999)
-
-        local on = defaultOn
-        local function update()
-            pillGrad.Color = on and ColorSequence.new(Config.ToggleOn, Config.AccentDim)
-                or ColorSequence.new(Config.ToggleOff, Config.ToggleOff)
-            Tween:Create(knob, TweenInfo.new(0.22), {
-                Position = on and UDim2.new(1, -21, 0.5, -9)
-                    or UDim2.new(0, 3, 0.5, -9)
-            }):Play()
-        end
-
-        pill.MouseButton1Click:Connect(function()
-            on = not on
-            update()
-            if cb then cb(on) end
-        end)
-
-        return { Set = function(v) on = v; update() end }
-    end
 
     local miniBtn = Instance.new("TextButton")
     miniBtn.Name = "MiniBtn"
@@ -392,9 +437,14 @@ local function buildUI()
     miniBtn.Active = true
     miniBtn.Draggable = true
     miniBtn.Parent = gui
-    corner(miniBtn, 12)
-    gradient(miniBtn, 90, {Config.CardTop, Config.CardBot})
-    label(miniBtn, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
+    CreateCorner(miniBtn, 12)
+
+    local miniGrad = Instance.new("UIGradient", miniBtn)
+    miniGrad.Rotation = 90
+    miniGrad.Color = ColorSequence.new(Config.CardTop, Config.CardBot)
+    miniGrad.Parent = miniBtn
+
+    MakeLabel(miniBtn, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
         Config.FontBold, 22, Config.AccentLight, Enum.TextXAlignment.Center)
 
     local win = Instance.new("Frame")
@@ -407,16 +457,24 @@ local function buildUI()
     win.Active = true
     win.ClipsDescendants = true
     win.Parent = gui
-    corner(win, 16)
-    gradient(win, 90, {Config.BgTop, Config.BgBot})
+    CreateCorner(win, 16)
+
+    local winGrad = Instance.new("UIGradient", win)
+    winGrad.Rotation = 90
+    winGrad.Color = ColorSequence.new(Config.BgTop, Config.BgBot)
+    winGrad.Parent = win
 
     local sidebar = Instance.new("Frame")
     sidebar.Size = UDim2.new(0, 155, 1, 0)
     sidebar.BackgroundColor3 = Config.SidebarTop
     sidebar.BorderSizePixel = 0
     sidebar.Parent = win
-    corner(sidebar, 16)
-    gradient(sidebar, 90, {Config.SidebarTop, Config.SidebarBot})
+    CreateCorner(sidebar, 16)
+
+    local sbGrad = Instance.new("UIGradient", sidebar)
+    sbGrad.Rotation = 90
+    sbGrad.Color = ColorSequence.new(Config.SidebarTop, Config.SidebarBot)
+    sbGrad.Parent = sidebar
 
     local logoBox = Instance.new("Frame")
     logoBox.Size = UDim2.new(0, 44, 0, 44)
@@ -425,21 +483,29 @@ local function buildUI()
     logoBox.BorderSizePixel = 0
     logoBox.ZIndex = 3
     logoBox.Parent = sidebar
-    corner(logoBox, 12)
-    gradient(logoBox, 135, {Config.CardTop, Config.CardBot})
-    label(logoBox, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
+    CreateCorner(logoBox, 12)
+
+    local lbGrad = Instance.new("UIGradient", logoBox)
+    lbGrad.Rotation = 135
+    lbGrad.Color = ColorSequence.new(Config.CardTop, Config.CardBot)
+    lbGrad.Parent = logoBox
+
+    MakeLabel(logoBox, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
         Config.FontBold, 22, Config.AccentLight, Enum.TextXAlignment.Center)
 
-    label(sidebar, "AxionHub", UDim2.new(1, -20, 0, 18), UDim2.new(0, 18, 0, 70),
+    MakeLabel(sidebar, "AxionHub",
+        UDim2.new(1, -20, 0, 18), UDim2.new(0, 18, 0, 70),
         Config.FontBold, 15, Config.Text)
 
-    label(sidebar, "AutoDice  " .. Config.Version,
+    MakeLabel(sidebar, "AutoDice  " .. Config.Version,
         UDim2.new(1, -20, 0, 14), UDim2.new(0, 18, 0, 88),
         Config.Font, 10, Config.Muted)
 
-    local pages = { "MAIN", "SETTINGS" }
-    local pageIcons = { "🏠", "⚙" }
-    local pageDesc = { MAIN = "dice & collect", SETTINGS = "animation / range" }
+    local pages = {
+        { Id = "MAIN", Icon = "🏠", Label = "Main", Desc = "dice & collect" },
+        { Id = "SETTINGS", Icon = "⚙", Label = "Settings", Desc = "animation / range" },
+    }
+
     local pageBtns = {}
 
     for i, p in ipairs(pages) do
@@ -453,37 +519,43 @@ local function buildUI()
         btn.AutoButtonColor = false
         btn.ZIndex = 3
         btn.Parent = sidebar
-        corner(btn, 10)
+        CreateCorner(btn, 10)
 
-        local glow = Instance.new("Frame", btn)
+        local glow = Instance.new("Frame")
         glow.Size = UDim2.new(1, 0, 1, 0)
         glow.BackgroundColor3 = Config.Accent
         glow.BackgroundTransparency = 0.85
         glow.BorderSizePixel = 0
         glow.Visible = false
         glow.ZIndex = 1
-        corner(glow, 10)
+        glow.Parent = btn
+        CreateCorner(glow, 10)
 
-        local badge = Instance.new("Frame", btn)
+        local badge = Instance.new("Frame")
         badge.Size = UDim2.new(0, 28, 0, 28)
         badge.Position = UDim2.new(0, 8, 0.5, -14)
         badge.BackgroundColor3 = Config.CardTop
         badge.BorderSizePixel = 0
         badge.ZIndex = 4
-        corner(badge, 8)
+        badge.Parent = btn
+        CreateCorner(badge, 8)
 
-        label(badge, pageIcons[i], UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
+        MakeLabel(badge, p.Icon, UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
             Config.FontBold, 14, Config.AccentLight, Enum.TextXAlignment.Center)
 
-        local nameLbl = label(btn, p:sub(1, 1) .. p:sub(2):lower(),
+        local nameLbl = MakeLabel(btn, p.Label,
             UDim2.new(1, -50, 0, 14), UDim2.new(0, 44, 0, 7),
             Config.FontBold, 11.5, Config.TextDim)
 
-        local descLbl = label(btn, pageDesc[p],
+        MakeLabel(btn, p.Desc,
             UDim2.new(1, -50, 0, 12), UDim2.new(0, 44, 0, 23),
             Config.Font, 9, Config.Muted)
 
-        pageBtns[p] = { btn = btn, glow = glow, name = nameLbl }
+        pageBtns[p.Id] = {
+            Btn = btn,
+            Glow = glow,
+            Name = nameLbl,
+        }
     end
 
     local content = Instance.new("Frame")
@@ -497,35 +569,43 @@ local function buildUI()
     mainPage.BackgroundTransparency = 1
     mainPage.Parent = content
 
-    local header = card(mainPage, UDim2.new(1, -36, 0, 46), UDim2.new(0, 18, 0, 16))
+    local header = MakeCard(mainPage, UDim2.new(1, -36, 0, 46), UDim2.new(0, 18, 0, 16))
 
-    local dot = Instance.new("Frame", header)
+    local dot = Instance.new("Frame")
     dot.Size = UDim2.new(0, 8, 0, 8)
     dot.Position = UDim2.new(0, 14, 0.5, -4)
     dot.BackgroundColor3 = Config.Muted
     dot.BorderSizePixel = 0
     dot.ZIndex = 5
-    corner(dot, 999)
+    dot.Parent = header
+    CreateCorner(dot, 999)
 
-    local statusTxt = label(header, "READY",
+    local statusTxt = MakeLabel(header, "READY",
         UDim2.new(1, -90, 1, 0), UDim2.new(0, 30, 0, 0),
         Config.Font, 11, Config.Text)
 
     task.spawn(function()
         while statusTxt.Parent do
-            local ready = remotesReady
-            local stat = ready and (State.running and "RUNNING" or "IDLE") or "NO REMOTES"
-            local color = ready and (State.running and Config.Good or Config.Muted) or Config.Bad
-            statusTxt.Text = string.format("💤 · %s · rolls: %d · 💰 %d",
-                stat, State.rolls, State.collected)
+            local stat = RemotesReady
+                and (State.Running and "RUNNING" or "IDLE")
+                or "NO REMOTES"
+            local color = RemotesReady
+                and (State.Running and Config.Good or Config.Muted)
+                or Config.Bad
+
+            statusTxt.Text = string.format(
+                "💤 · %s · rolls: %d · 💰 %d",
+                stat, State.Rolls, State.Collected
+            )
             dot.BackgroundColor3 = color
             task.wait(0.2)
         end
     end)
 
-    local modeCard = card(mainPage, UDim2.new(1, -36, 0, 106), UDim2.new(0, 18, 0, 76))
+    local modeCard = MakeCard(mainPage, UDim2.new(1, -36, 0, 106), UDim2.new(0, 18, 0, 76))
 
-    label(modeCard, "MODE", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8),
+    MakeLabel(modeCard, "MODE",
+        UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8),
         Config.FontBold, 9.5, Config.AccentLight)
 
     local modes = { "AUTO", "SPAM", "BOTH" }
@@ -545,14 +625,14 @@ local function buildUI()
         mb.AutoButtonColor = false
         mb.ZIndex = 4
         mb.Parent = modeCard
-        corner(mb, 8)
+        CreateCorner(mb, 8)
 
         modeBtns[m] = mb
 
         mb.MouseButton1Click:Connect(function()
-            State.mode = m
-            for mm, btn in pairs(modeBtns) do
-                local on = (mm == State.mode)
+            State.Mode = m
+            for key, btn in pairs(modeBtns) do
+                local on = (key == State.Mode)
                 btn.BackgroundColor3 = on and Config.Accent or Color3.fromRGB(16, 4, 32)
                 btn.BackgroundTransparency = on and 0.2 or 0.35
                 btn.TextColor3 = on and Config.Text or Config.TextDim
@@ -560,65 +640,78 @@ local function buildUI()
         end)
     end
 
-    for mm, btn in pairs(modeBtns) do
-        local on = (mm == State.mode)
+    for key, btn in pairs(modeBtns) do
+        local on = (key == State.Mode)
         btn.BackgroundColor3 = on and Config.Accent or Color3.fromRGB(16, 4, 32)
         btn.BackgroundTransparency = on and 0.2 or 0.35
         btn.TextColor3 = on and Config.Text or Config.TextDim
     end
 
-    local autoRollRow = Instance.new("Frame", modeCard)
+    local autoRollRow = Instance.new("Frame")
     autoRollRow.Size = UDim2.new(1, -28, 0, 40)
     autoRollRow.Position = UDim2.new(0, 14, 0, 66)
     autoRollRow.BackgroundTransparency = 1
     autoRollRow.ZIndex = 4
+    autoRollRow.Parent = modeCard
 
-    label(autoRollRow, "🎲 Auto Roll",
+    MakeLabel(autoRollRow, "🎲 Auto Roll",
         UDim2.new(0.7, 0, 1, 0), UDim2.new(0, 0, 0, 0),
         Config.FontBold, 12, Config.Text)
 
-    local arPill = Instance.new("TextButton", autoRollRow)
+    local arPill = Instance.new("TextButton")
     arPill.Size = UDim2.new(0, 62, 0, 30)
     arPill.Position = UDim2.new(1, -62, 0.5, -15)
     arPill.BackgroundColor3 = Color3.fromRGB(10, 3, 20)
     arPill.Text = ""
     arPill.AutoButtonColor = false
     arPill.ZIndex = 5
-    corner(arPill, 999)
+    arPill.Parent = autoRollRow
+    CreateCorner(arPill, 999)
 
-    local arGrad = gradient(arPill, 0, {Config.ToggleOff, Config.ToggleOff})
-    toggleGlow(arPill)
+    local arGrad = Instance.new("UIGradient", arPill)
+    arGrad.Rotation = 0
+    arGrad.Color = ColorSequence.new(Config.ToggleOff, Config.ToggleOff)
+    arGrad.Parent = arPill
 
-    local arK = Instance.new("Frame", arPill)
+    MakeToggleGlow(arPill)
+
+    local arK = Instance.new("Frame")
     arK.Size = UDim2.new(0, 24, 0, 24)
     arK.Position = UDim2.new(0, 3, 0.5, -12)
     arK.BackgroundColor3 = Color3.new(1, 1, 1)
     arK.BorderSizePixel = 0
     arK.ZIndex = 6
-    corner(arK, 999)
+    arK.Parent = arPill
+    CreateCorner(arK, 999)
 
     arPill.MouseButton1Click:Connect(function()
-        if State.running then stopDice() else startDice() end
-        local on = State.running
-        arGrad.Color = on and ColorSequence.new(Config.ToggleOn, Config.AccentDim)
+        if State.Running then
+            StopDice()
+        else
+            StartDice()
+        end
+        local on = State.Running
+        arGrad.Color = on
+            and ColorSequence.new(Config.ToggleOn, Config.AccentDim)
             or ColorSequence.new(Config.ToggleOff, Config.ToggleOff)
         Tween:Create(arK, TweenInfo.new(0.25), {
-            Position = on and UDim2.new(1, -27, 0.5, -12)
+            Position = on
+                and UDim2.new(1, -27, 0.5, -12)
                 or UDim2.new(0, 3, 0.5, -12),
         }):Play()
     end)
 
-    local speedCard = card(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 192))
+    local speedCard = MakeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 192))
 
-    label(speedCard, "SPAM SPEED",
+    MakeLabel(speedCard, "SPAM SPEED",
         UDim2.new(0.5, 0, 0, 14), UDim2.new(0, 12, 0, 8),
         Config.FontBold, 9.5, Config.AccentLight)
 
-    local spdVal = label(speedCard, "33 / sec",
+    local spdVal = MakeLabel(speedCard, "33 / sec",
         UDim2.new(0.5, -12, 0, 14), UDim2.new(0.5, 0, 0, 8),
         Config.FontBold, 11, Config.Text, Enum.TextXAlignment.Right)
 
-    local track = Instance.new("TextButton", speedCard)
+    local track = Instance.new("TextButton")
     track.Size = UDim2.new(1, -24, 0, 10)
     track.Position = UDim2.new(0, 12, 0, 36)
     track.BackgroundColor3 = Color3.fromRGB(6, 2, 12)
@@ -626,31 +719,39 @@ local function buildUI()
     track.Text = ""
     track.AutoButtonColor = false
     track.ZIndex = 4
-    corner(track, 999)
+    track.Parent = speedCard
+    CreateCorner(track, 999)
 
-    local fill = Instance.new("Frame", track)
+    local fill = Instance.new("Frame")
     fill.Size = UDim2.new(0.5, 0, 1, 0)
     fill.BackgroundColor3 = Config.Accent
     fill.BorderSizePixel = 0
     fill.ZIndex = 5
-    corner(fill, 999)
-    gradient(fill, 0, {Config.AccentDim, Config.AccentLight})
+    fill.Parent = track
+    CreateCorner(fill, 999)
 
-    local knob = Instance.new("Frame", track)
+    local fillGrad = Instance.new("UIGradient", fill)
+    fillGrad.Rotation = 0
+    fillGrad.Color = ColorSequence.new(Config.AccentDim, Config.AccentLight)
+    fillGrad.Parent = fill
+
+    local knob = Instance.new("Frame")
     knob.Size = UDim2.new(0, 14, 0, 14)
     knob.Position = UDim2.new(0.5, -7, 0.5, -7)
     knob.BackgroundColor3 = Color3.new(1, 1, 1)
     knob.BorderSizePixel = 0
     knob.ZIndex = 6
-    corner(knob, 999)
+    knob.Parent = track
+    CreateCorner(knob, 999)
 
     local draggingSlider = false
-    local function setFromX(x)
+
+    local function SetFromX(x)
         local rel = math.clamp((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
         fill.Size = UDim2.new(rel, 0, 1, 0)
         knob.Position = UDim2.new(rel, -7, 0.5, -7)
         local rate = math.floor(20 + rel * 180)
-        State.spamSpeed = 1 / rate
+        State.SpamSpeed = 1 / rate
         spdVal.Text = rate .. " / sec"
     end
 
@@ -658,15 +759,17 @@ local function buildUI()
         if inp.UserInputType == Enum.UserInputType.MouseButton1
             or inp.UserInputType == Enum.UserInputType.Touch then
             draggingSlider = true
-            setFromX(inp.Position.X)
+            SetFromX(inp.Position.X)
         end
     end)
+
     track.InputChanged:Connect(function(inp)
         if draggingSlider and (inp.UserInputType == Enum.UserInputType.MouseMovement
             or inp.UserInputType == Enum.UserInputType.Touch) then
-            setFromX(inp.Position.X)
+            SetFromX(inp.Position.X)
         end
     end)
+
     UIS.InputEnded:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
             or inp.UserInputType == Enum.UserInputType.Touch then
@@ -674,16 +777,16 @@ local function buildUI()
         end
     end)
 
-    local collectCard = card(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 262))
+    local collectCard = MakeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 262))
 
-    makeToggle(collectCard, 11, "💰 AFK Collect Money",
-        State.autoCollect,
+    MakeToggle(collectCard, 11, "💰 AFK Collect Money", State.AutoCollect,
         function(v)
-            if v then startCollect() else stopCollect() end
+            if v then StartCollect() else StopCollect() end
         end)
 
-    label(collectCard, string.format("every %.1fs · plot %d→%d",
-        State.collectRate, State.plotMin, State.plotMax),
+    MakeLabel(collectCard,
+        string.format("every %.1fs · plot %d→%d",
+            State.CollectRate, State.PlotMin, State.PlotMax),
         UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 42),
         Config.Font, 9, Config.AccentLight)
 
@@ -693,33 +796,33 @@ local function buildUI()
     settingsPage.Visible = false
     settingsPage.Parent = content
 
-    local sHeader = card(settingsPage, UDim2.new(1, -36, 0, 46), UDim2.new(0, 18, 0, 16))
-    label(sHeader, "⚙  Settings",
+    local sHeader = MakeCard(settingsPage, UDim2.new(1, -36, 0, 46), UDim2.new(0, 18, 0, 16))
+
+    MakeLabel(sHeader, "⚙  Settings",
         UDim2.new(1, -30, 1, 0), UDim2.new(0, 16, 0, 0),
         Config.FontBold, 12, Config.Text)
 
-    local setCard = card(settingsPage, UDim2.new(1, -36, 0, 92), UDim2.new(0, 18, 0, 76))
+    local setCard = MakeCard(settingsPage, UDim2.new(1, -36, 0, 92), UDim2.new(0, 18, 0, 76))
 
-    makeToggle(setCard, 4, "Bypass Roll Animation",
-        State.bypassAnim,
-        function(v) State.bypassAnim = v end)
+    MakeToggle(setCard, 4, "Bypass Roll Animation", State.BypassAnim,
+        function(v) State.BypassAnim = v end)
 
-    makeToggle(setCard, 48, "Kill Camera Cutscene",
-        State.killCutscene,
-        function(v) State.killCutscene = v end)
+    MakeToggle(setCard, 48, "Kill Camera Cutscene", State.KillCutscene,
+        function(v) State.KillCutscene = v end)
 
-    local rangeCard = card(settingsPage, UDim2.new(1, -36, 0, 76), UDim2.new(0, 18, 0, 180))
+    local rangeCard = MakeCard(settingsPage, UDim2.new(1, -36, 0, 76), UDim2.new(0, 18, 0, 180))
 
-    label(rangeCard, "PLOT RANGE",
+    MakeLabel(rangeCard, "PLOT RANGE",
         UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8),
         Config.FontBold, 9.5, Config.AccentLight)
 
-    local rcVal = label(rangeCard, string.format("1 → %d", State.plotMax),
+    local rcVal = MakeLabel(rangeCard,
+        string.format("1 → %d", State.PlotMax),
         UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 26),
         Config.Font, 10, Config.Text)
 
-    local function rangeBtn(txt, xPos, val)
-        local b = Instance.new("TextButton", rangeCard)
+    local function RangeBtn(txt, xPos, val)
+        local b = Instance.new("TextButton")
         b.Size = UDim2.new(0, 52, 0, 26)
         b.Position = UDim2.new(0, xPos, 0, 44)
         b.BackgroundColor3 = Config.CardTop
@@ -731,33 +834,34 @@ local function buildUI()
         b.AutoButtonColor = false
         b.ZIndex = 4
         b.Parent = rangeCard
-        corner(b, 8)
+        CreateCorner(b, 8)
 
         b.MouseButton1Click:Connect(function()
-            State.plotMin, State.plotMax = 1, val
-            rcVal.Text = string.format("1 → %d", State.plotMax)
+            State.PlotMin = 1
+            State.PlotMax = val
+            rcVal.Text = string.format("1 → %d", State.PlotMax)
         end)
     end
 
-    rangeBtn("1 → 4", 14, 4)
-    rangeBtn("1 → 8", 72, 8)
-    rangeBtn("1 → 16", 130, 16)
+    RangeBtn("1 → 4", 14, 4)
+    RangeBtn("1 → 8", 72, 8)
+    RangeBtn("1 → 16", 130, 16)
 
-    local function applyPage()
-        for p, data in pairs(pageBtns) do
-            local on = (p == State.page)
-            data.glow.Visible = on
-            data.name.TextColor3 = on and Config.Text or Config.TextDim
-            data.btn.BackgroundTransparency = on and 0.15 or 0.7
+    local function ApplyPage()
+        for id, data in pairs(pageBtns) do
+            local on = (id == State.Page)
+            data.Glow.Visible = on
+            data.Name.TextColor3 = on and Config.Text or Config.TextDim
+            data.Btn.BackgroundTransparency = on and 0.15 or 0.7
         end
-        mainPage.Visible = (State.page == "MAIN")
-        settingsPage.Visible = (State.page == "SETTINGS")
+        mainPage.Visible = (State.Page == "MAIN")
+        settingsPage.Visible = (State.Page == "SETTINGS")
     end
 
-    for p, data in pairs(pageBtns) do
-        data.btn.MouseButton1Click:Connect(function()
-            State.page = p
-            applyPage()
+    for id, data in pairs(pageBtns) do
+        data.Btn.MouseButton1Click:Connect(function()
+            State.Page = id
+            ApplyPage()
         end)
     end
 
@@ -781,7 +885,7 @@ local function buildUI()
     minBtn.AutoButtonColor = false
     minBtn.ZIndex = 11
     minBtn.Parent = topBtns
-    corner(minBtn, 999)
+    CreateCorner(minBtn, 999)
 
     local closeBtn = Instance.new("TextButton")
     closeBtn.Size = UDim2.new(0, 22, 0, 22)
@@ -796,40 +900,41 @@ local function buildUI()
     closeBtn.AutoButtonColor = false
     closeBtn.ZIndex = 11
     closeBtn.Parent = topBtns
-    corner(closeBtn, 999)
+    CreateCorner(closeBtn, 999)
 
     local blur = Instance.new("BlurEffect")
     blur.Name = "AxionHubBlur_Internal"
-    blur.Size = 8
+    blur.Size = Config.BlurSize
     blur.Parent = Lighting
 
+    gui.Destroying:Connect(function()
+        pcall(function() blur:Destroy() end)
+    end)
+
     minBtn.MouseButton1Click:Connect(function()
-        State.minimized = true
+        State.Minimized = true
         win.Visible = false
         miniBtn.Visible = true
         blur.Size = 0
     end)
 
     closeBtn.MouseButton1Click:Connect(function()
-        pcall(stopDice)
-        pcall(stopCollect)
+        pcall(StopDice)
+        pcall(StopCollect)
         pcall(function() blur:Destroy() end)
         pcall(function() gui:Destroy() end)
     end)
 
     miniBtn.MouseButton1Click:Connect(function()
-        State.minimized = false
+        State.Minimized = false
         win.Visible = true
         miniBtn.Visible = false
-        blur.Size = 8
-    end)
-
-    gui.Destroying:Connect(function()
-        pcall(function() blur:Destroy() end)
+        blur.Size = Config.BlurSize
     end)
 
     local draggingWin = false
     local dragStart, startPos
+
     header.InputBegan:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
             or inp.UserInputType == Enum.UserInputType.Touch then
@@ -838,6 +943,7 @@ local function buildUI()
             startPos = win.Position
         end
     end)
+
     UIS.InputChanged:Connect(function(inp)
         if draggingWin and (inp.UserInputType == Enum.UserInputType.MouseMovement
             or inp.UserInputType == Enum.UserInputType.Touch) then
@@ -848,6 +954,7 @@ local function buildUI()
             )
         end
     end)
+
     UIS.InputEnded:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
             or inp.UserInputType == Enum.UserInputType.Touch then
@@ -855,17 +962,15 @@ local function buildUI()
         end
     end)
 
-    applyPage()
+    ApplyPage()
     return gui
 end
 
-local ok, err = pcall(buildUI)
+local ok, err = pcall(BuildUI)
 if not ok then
-    warn("[AxionHub] buildUI ERROR:", err)
+    warn("[AxionHub] BuildUI Error: " .. tostring(err))
     pcall(function()
         local b = Lighting:FindFirstChild("AxionHubBlur_Internal")
         if b then b:Destroy() end
     end)
 end
-
-print("[AxionHub] " .. Config.Version .. " ready.")
