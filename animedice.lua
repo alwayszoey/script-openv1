@@ -1,7 +1,7 @@
 --[[
-    AxionHub AnimeDice  v1.0.2
+    AxionHub AnimeDice  v1.0.3
     Neon Purple Gradient UI
-    All original logic preserved.
+    Glassmorphism Sidebar + Bright Controls
 --]]
 
 local Services = {
@@ -25,28 +25,41 @@ local RunService = Services.RunService
 --=====================================================================
 local Config = {
     Name = "AxionHub_AutoDice",
-    Version = "v1.0.2",
+    Version = "v1.0.3",
 
-    -- Neon Purple Gradient Palette
+    -- Neon Purple Gradient Palette (brighter)
     NeonBright = Color3.fromRGB(192, 132, 252),
-    NeonDeep = Color3.fromRGB(126, 34, 206),
+    NeonDeep = Color3.fromRGB(147, 51, 234),
     NeonGlow = Color3.fromRGB(233, 213, 255),
-    NeonAccent = Color3.fromRGB(157, 78, 221),
+    NeonAccent = Color3.fromRGB(168, 85, 247),
+    NeonHot = Color3.fromRGB(217, 70, 239),
 
-    -- Backgrounds
+    -- Backgrounds (semi-transparent)
     BgDark = Color3.fromRGB(15, 10, 21),
-    BgCard = Color3.fromRGB(22, 11, 36),
-    BgCardHi = Color3.fromRGB(30, 16, 48),
-    BgSidebar = Color3.fromRGB(18, 10, 28),
+    BgTop = Color3.fromRGB(48, 22, 78),       -- lighter purple tint (top)
+    BgBot = Color3.fromRGB(12, 4, 22),        -- deep purple (bottom)
+    BgCard = Color3.fromRGB(28, 14, 46),
+    BgCardHi = Color3.fromRGB(42, 20, 68),
+    BgSidebar = Color3.fromRGB(28, 14, 44),
 
-    -- Component colors
-    TrackBg = Color3.fromRGB(12, 6, 20),
-    PillOff = Color3.fromRGB(24, 14, 40),
+    -- Window opacity
+    WindowTransparency = 0.15,
+    SidebarTransparency = 0.35,
+    ContentTransparency = 0.1,
+    CardTransparency = 0.15,
+
+    -- Component colors (brighter)
+    TrackBg = Color3.fromRGB(22, 10, 40),
+    TrackBorder = Color3.fromRGB(120, 60, 200),
+    PillOff = Color3.fromRGB(40, 20, 66),
+    PillOffBorder = Color3.fromRGB(90, 45, 150),
+    BtnInactive = Color3.fromRGB(52, 26, 84),
+    BtnInactiveBorder = Color3.fromRGB(120, 60, 190),
 
     -- Text
-    Text = Color3.fromRGB(245, 240, 255),
-    TextDim = Color3.fromRGB(200, 180, 235),
-    Muted = Color3.fromRGB(130, 110, 165),
+    Text = Color3.fromRGB(248, 244, 255),
+    TextDim = Color3.fromRGB(210, 190, 240),
+    Muted = Color3.fromRGB(150, 128, 190),
     Good = Color3.fromRGB(130, 255, 180),
     Bad = Color3.fromRGB(255, 100, 130),
 
@@ -54,7 +67,7 @@ local Config = {
     FontBold = Enum.Font.GothamBold,
     FontMedium = Enum.Font.GothamMedium,
 
-    BlurSize = 8,
+    BlurSize = 10,
 }
 
 --=====================================================================
@@ -319,9 +332,9 @@ end
 
 local function Stroke(parent, color, thickness, transparency)
     local s = Instance.new("UIStroke")
-    s.Color = color or Color3.fromRGB(60, 30, 100)
+    s.Color = color or Color3.fromRGB(120, 60, 200)
     s.Thickness = thickness or 1
-    s.Transparency = transparency or 0.5
+    s.Transparency = transparency or 0.4
     s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     s.Parent = parent
     return s
@@ -363,6 +376,7 @@ local function Card(parent, size, pos)
     c.Size = size
     c.Position = pos
     c.BackgroundColor3 = Config.BgCard
+    c.BackgroundTransparency = Config.CardTransparency
     c.BorderSizePixel = 0
     c.ZIndex = 3
     c.Parent = parent
@@ -373,18 +387,13 @@ local function Card(parent, size, pos)
         ColorSequenceKeypoint.new(1.00, Config.BgCard),
     }))
 
-    local s = Instance.new("UIStroke")
-    s.Color = Color3.fromRGB(45, 25, 75)
-    s.Thickness = 1
-    s.Transparency = 0.5
-    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    s.Parent = c
+    Stroke(c, Color3.fromRGB(80, 40, 130), 1, 0.35)
 
     return c
 end
 
 --=====================================================================
--- TOGGLE (Pill)
+-- TOGGLE (Pill) — BRIGHT
 --=====================================================================
 local function Toggle(parent, y, title, defaultOn, callback)
     local row = Instance.new("Frame")
@@ -398,8 +407,8 @@ local function Toggle(parent, y, title, defaultOn, callback)
         Config.FontMedium, 11.5, Config.Text)
 
     local pill = Instance.new("TextButton")
-    pill.Size = UDim2.new(0, 46, 0, 24)
-    pill.Position = UDim2.new(1, -60, 0.5, -12)
+    pill.Size = UDim2.new(0, 48, 0, 26)
+    pill.Position = UDim2.new(1, -62, 0.5, -13)
     pill.BackgroundColor3 = Config.PillOff
     pill.Text = ""
     pill.AutoButtonColor = false
@@ -407,18 +416,28 @@ local function Toggle(parent, y, title, defaultOn, callback)
     pill.Parent = row
     Corner(pill, 999)
 
+    -- Gradient
     local pillGrad = Instance.new("UIGradient", pill)
     pillGrad.Rotation = 0
     pillGrad.Color = defaultOn
         and ColorSequence.new(Config.NeonBright, Config.NeonDeep)
-        or ColorSequence.new(Config.PillOff, Config.PillOff)
+        or ColorSequence.new(Config.PillOff, Color3.fromRGB(30, 14, 52))
     pillGrad.Parent = pill
 
+    -- Outline (brighter, thicker)
+    local pillStroke = Instance.new("UIStroke", pill)
+    pillStroke.Thickness = 1.5
+    pillStroke.Transparency = defaultOn and 0.05 or 0.3
+    pillStroke.Color = defaultOn and Config.NeonGlow or Config.PillOffBorder
+    pillStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    pillStroke.Parent = pill
+
+    -- Glow highlight
     local glow = Instance.new("Frame", pill)
     glow.Size = UDim2.new(0.6, 0, 0.6, 0)
     glow.Position = UDim2.new(0, 0, 0, 0)
     glow.BackgroundColor3 = Color3.fromRGB(255, 240, 255)
-    glow.BackgroundTransparency = 0.4
+    glow.BackgroundTransparency = defaultOn and 0.35 or 0.75
     glow.BorderSizePixel = 0
     glow.ZIndex = 2
     Corner(glow, 999)
@@ -426,32 +445,47 @@ local function Toggle(parent, y, title, defaultOn, callback)
     local gg = Instance.new("UIGradient", glow)
     gg.Rotation = 135
     gg.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0.3),
+        NumberSequenceKeypoint.new(0, 0.2),
         NumberSequenceKeypoint.new(0.6, 1),
         NumberSequenceKeypoint.new(1, 1),
     })
     gg.Parent = glow
 
+    -- Knob
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.new(0, 18, 0, 18)
+    knob.Size = UDim2.new(0, 20, 0, 20)
     knob.Position = defaultOn
-        and UDim2.new(1, -21, 0.5, -9)
-        or UDim2.new(0, 3, 0.5, -9)
+        and UDim2.new(1, -23, 0.5, -10)
+        or UDim2.new(0, 3, 0.5, -10)
     knob.BackgroundColor3 = Color3.new(1, 1, 1)
     knob.BorderSizePixel = 0
     knob.ZIndex = 6
     knob.Parent = pill
     Corner(knob, 999)
 
+    local knobStroke = Instance.new("UIStroke", knob)
+    knobStroke.Color = Config.NeonGlow
+    knobStroke.Thickness = 1
+    knobStroke.Transparency = 0.3
+    knobStroke.Parent = knob
+
     local on = defaultOn
     local function Update()
         pillGrad.Color = on
             and ColorSequence.new(Config.NeonBright, Config.NeonDeep)
-            or ColorSequence.new(Config.PillOff, Config.PillOff)
+            or ColorSequence.new(Config.PillOff, Color3.fromRGB(30, 14, 52))
+
+        pillStroke.Color = on and Config.NeonGlow or Config.PillOffBorder
+        pillStroke.Transparency = on and 0.05 or 0.3
+
+        Tween:Create(glow, TweenInfo.new(0.22), {
+            BackgroundTransparency = on and 0.35 or 0.75,
+        }):Play()
+
         Tween:Create(knob, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             Position = on
-                and UDim2.new(1, -21, 0.5, -9)
-                or UDim2.new(0, 3, 0.5, -9),
+                and UDim2.new(1, -23, 0.5, -10)
+                or UDim2.new(0, 3, 0.5, -10),
         }):Play()
     end
 
@@ -468,7 +502,7 @@ local function Toggle(parent, y, title, defaultOn, callback)
 end
 
 --=====================================================================
--- SLIDER (with -/+ and unit)
+-- SLIDER (bright)
 --=====================================================================
 local function Slider(parent, y, title, minV, maxV, defaultV, suffix, callback)
     local row = Instance.new("Frame")
@@ -485,13 +519,11 @@ local function Slider(parent, y, title, minV, maxV, defaultV, suffix, callback)
         UDim2.new(0.4, -14, 0, 14), UDim2.new(0.6, 0, 0, 0),
         Config.FontBold, 10.5, Config.NeonGlow, Enum.TextXAlignment.Right)
 
-    local minus = Label(row, "-", UDim2.new(0, 10, 0, 20), UDim2.new(0, 14, 0, 22),
-        Config.FontBold, 14, Config.Muted, Enum.TextXAlignment.Center)
-    minus.ZIndex = 6
+    Label(row, "-", UDim2.new(0, 10, 0, 20), UDim2.new(0, 14, 0, 22),
+        Config.FontBold, 14, Config.NeonGlow, Enum.TextXAlignment.Center)
 
-    local plus = Label(row, "+", UDim2.new(0, 10, 0, 20), UDim2.new(1, -24, 0, 22),
-        Config.FontBold, 14, Config.Muted, Enum.TextXAlignment.Center)
-    plus.ZIndex = 6
+    Label(row, "+", UDim2.new(0, 10, 0, 20), UDim2.new(1, -24, 0, 22),
+        Config.FontBold, 14, Config.NeonGlow, Enum.TextXAlignment.Center)
 
     local track = Instance.new("TextButton")
     track.Size = UDim2.new(1, -60, 0, 8)
@@ -503,6 +535,13 @@ local function Slider(parent, y, title, minV, maxV, defaultV, suffix, callback)
     track.ZIndex = 4
     track.Parent = row
     Corner(track, 999)
+
+    -- Track border (visible)
+    local trackStroke = Instance.new("UIStroke", track)
+    trackStroke.Color = Config.TrackBorder
+    trackStroke.Thickness = 1
+    trackStroke.Transparency = 0.5
+    trackStroke.Parent = track
 
     local rel0 = math.clamp((defaultV - minV) / (maxV - minV), 0, 1)
 
@@ -516,6 +555,12 @@ local function Slider(parent, y, title, minV, maxV, defaultV, suffix, callback)
 
     Gradient(fill, 0, ColorSequence.new(Config.NeonDeep, Config.NeonBright))
 
+    local fillGlow = Instance.new("UIStroke", fill)
+    fillGlow.Color = Config.NeonGlow
+    fillGlow.Thickness = 1
+    fillGlow.Transparency = 0.4
+    fillGlow.Parent = fill
+
     local knob = Instance.new("Frame")
     knob.Size = UDim2.new(0, 16, 0, 16)
     knob.Position = UDim2.new(rel0, -8, 0.5, -8)
@@ -524,6 +569,12 @@ local function Slider(parent, y, title, minV, maxV, defaultV, suffix, callback)
     knob.ZIndex = 6
     knob.Parent = track
     Corner(knob, 999)
+
+    local knobStroke = Instance.new("UIStroke", knob)
+    knobStroke.Color = Config.NeonBright
+    knobStroke.Thickness = 2
+    knobStroke.Transparency = 0.2
+    knobStroke.Parent = knob
 
     local dragging = false
 
@@ -563,7 +614,6 @@ local function Slider(parent, y, title, minV, maxV, defaultV, suffix, callback)
         end
     end)
 
-    -- -/+ buttons
     local btnMinus = Instance.new("TextButton")
     btnMinus.Size = UDim2.new(0, 20, 0, 20)
     btnMinus.Position = UDim2.new(0, 9, 0, 22)
@@ -596,20 +646,22 @@ local function Slider(parent, y, title, minV, maxV, defaultV, suffix, callback)
 end
 
 --=====================================================================
--- CHECKBOX
+-- CHECKBOX (bright)
 --=====================================================================
 local function Checkbox(parent, y, title, defaultOn, callback)
     local row = Instance.new("TextButton")
     row.Size = UDim2.new(1, 0, 0, 36)
     row.Position = UDim2.new(0, 0, 0, y)
     row.BackgroundColor3 = Config.BgCard
-    row.BackgroundTransparency = 0.4
+    row.BackgroundTransparency = 0.35
     row.BorderSizePixel = 0
     row.Text = ""
     row.AutoButtonColor = false
     row.ZIndex = 4
     row.Parent = parent
     Corner(row, 8)
+
+    Stroke(row, Config.BtnInactiveBorder, 1, 0.4)
 
     Label(row, title, UDim2.new(1, -60, 1, 0), UDim2.new(0, 14, 0, 0),
         Config.FontMedium, 11, Config.Text)
@@ -623,13 +675,17 @@ local function Checkbox(parent, y, title, defaultOn, callback)
     box.Parent = row
     Corner(box, 5)
 
-    Stroke(box, Color3.fromRGB(60, 30, 100), 1.2, 0.4)
-
     local boxGrad = Instance.new("UIGradient", box)
     boxGrad.Color = defaultOn
         and ColorSequence.new(Config.NeonBright, Config.NeonDeep)
-        or ColorSequence.new(Config.PillOff, Config.PillOff)
+        or ColorSequence.new(Config.PillOff, Color3.fromRGB(30, 14, 52))
     boxGrad.Parent = box
+
+    local boxStroke = Instance.new("UIStroke", box)
+    boxStroke.Color = defaultOn and Config.NeonGlow or Config.PillOffBorder
+    boxStroke.Thickness = 1.3
+    boxStroke.Transparency = defaultOn and 0.15 or 0.4
+    boxStroke.Parent = box
 
     local check = Instance.new("TextLabel")
     check.Text = "✓"
@@ -646,7 +702,9 @@ local function Checkbox(parent, y, title, defaultOn, callback)
     local function Update()
         boxGrad.Color = on
             and ColorSequence.new(Config.NeonBright, Config.NeonDeep)
-            or ColorSequence.new(Config.PillOff, Config.PillOff)
+            or ColorSequence.new(Config.PillOff, Color3.fromRGB(30, 14, 52))
+        boxStroke.Color = on and Config.NeonGlow or Config.PillOffBorder
+        boxStroke.Transparency = on and 0.15 or 0.4
         Tween:Create(check, TweenInfo.new(0.18), { TextTransparency = on and 0 or 1 }):Play()
     end
 
@@ -670,11 +728,13 @@ local function Dropdown(parent, y, title, options, defaultIndex, callback)
     row.Size = UDim2.new(1, 0, 0, 36)
     row.Position = UDim2.new(0, 0, 0, y)
     row.BackgroundColor3 = Config.BgCard
-    row.BackgroundTransparency = 0.4
+    row.BackgroundTransparency = 0.35
     row.BorderSizePixel = 0
     row.ZIndex = 4
     row.Parent = parent
     Corner(row, 8)
+
+    Stroke(row, Config.BtnInactiveBorder, 1, 0.4)
 
     Label(row, title, UDim2.new(0.4, 0, 1, 0), UDim2.new(0, 14, 0, 0),
         Config.FontMedium, 11, Config.Text)
@@ -719,6 +779,8 @@ local function Dropdown(parent, y, title, options, defaultIndex, callback)
         menu.Parent = row
         Corner(menu, 8)
 
+        Stroke(menu, Config.BtnInactiveBorder, 1, 0.3)
+
         for i, opt in ipairs(options) do
             local item = Instance.new("TextButton")
             item.Size = UDim2.new(1, -8, 0, 24)
@@ -737,7 +799,7 @@ local function Dropdown(parent, y, title, options, defaultIndex, callback)
             Corner(item, 6)
 
             item.MouseEnter:Connect(function()
-                Tween:Create(item, TweenInfo.new(0.15), { BackgroundTransparency = 0.6 }):Play()
+                Tween:Create(item, TweenInfo.new(0.15), { BackgroundTransparency = 0.5 }):Play()
             end)
             item.MouseLeave:Connect(function()
                 Tween:Create(item, TweenInfo.new(0.15), { BackgroundTransparency = 1 }):Play()
@@ -772,6 +834,16 @@ local function BuildUI()
     gui.DisplayOrder = 999
     gui.Parent = parent
 
+    -- Global blur (affects game behind UI for glass effect)
+    local guiBlur = Instance.new("BlurEffect")
+    guiBlur.Name = "AxionHubBlur_Internal"
+    guiBlur.Size = Config.BlurSize
+    guiBlur.Parent = Lighting
+
+    gui.Destroying:Connect(function()
+        pcall(function() guiBlur:Destroy() end)
+    end)
+
     -- Mini mode button
     local miniBtn = Instance.new("TextButton")
     miniBtn.Name = "MiniBtn"
@@ -788,6 +860,8 @@ local function BuildUI()
     Corner(miniBtn, 12)
 
     Gradient(miniBtn, 135, ColorSequence.new(Config.NeonBright, Config.NeonDeep))
+    Stroke(miniBtn, Config.NeonGlow, 1.4, 0.2)
+
     Label(miniBtn, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
         Config.FontBold, 22, Config.NeonGlow, Enum.TextXAlignment.Center)
 
@@ -797,27 +871,49 @@ local function BuildUI()
     win.Size = UDim2.new(0, 580, 0, 420)
     win.Position = UDim2.new(0.5, -290, 0.5, -210)
     win.BackgroundColor3 = Config.BgDark
-    win.BackgroundTransparency = 0.05
+    win.BackgroundTransparency = Config.WindowTransparency
     win.BorderSizePixel = 0
     win.Active = true
     win.ClipsDescendants = true
     win.Parent = gui
     Corner(win, 16)
 
-    Gradient(win, 90, ColorSequence.new(Config.BgDark, Color3.fromRGB(8, 4, 12)))
+    -- Window gradient overlay (subtle)
+    Gradient(win, 90, ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 14, 52)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 4, 18)),
+    }))
 
-    -- Sidebar
+    -- ============ SIDEBAR (glass) ============
     local sidebar = Instance.new("Frame")
     sidebar.Size = UDim2.new(0, 155, 1, 0)
     sidebar.BackgroundColor3 = Config.BgSidebar
+    sidebar.BackgroundTransparency = Config.SidebarTransparency   -- semi-transparent
     sidebar.BorderSizePixel = 0
     sidebar.Parent = win
     Corner(sidebar, 16)
 
-    Gradient(sidebar, 90, ColorSequence.new(
-        Color3.fromRGB(28, 16, 44),
-        Color3.fromRGB(12, 6, 20)
-    ))
+    Gradient(sidebar, 90, ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(52, 26, 82)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 8, 34)),
+    }))
+
+    -- Sidebar glass edge
+    local sbStroke = Instance.new("UIStroke", sidebar)
+    sbStroke.Color = Config.NeonDeep
+    sbStroke.Thickness = 1.2
+    sbStroke.Transparency = 0.5
+    sbStroke.Parent = sidebar
+
+    -- Sidebar inner highlight (glassmorphism reflection)
+    local sbHi = Instance.new("Frame", sidebar)
+    sbHi.Size = UDim2.new(1, -2, 0, 1)
+    sbHi.Position = UDim2.new(0, 1, 0, 1)
+    sbHi.BackgroundColor3 = Color3.fromRGB(255, 240, 255)
+    sbHi.BackgroundTransparency = 0.6
+    sbHi.BorderSizePixel = 0
+    sbHi.ZIndex = 2
+    Corner(sbHi, 999)
 
     local logoBox = Instance.new("Frame")
     logoBox.Size = UDim2.new(0, 44, 0, 44)
@@ -828,6 +924,8 @@ local function BuildUI()
     logoBox.Parent = sidebar
     Corner(logoBox, 12)
     Gradient(logoBox, 135, ColorSequence.new(Config.NeonBright, Config.NeonDeep))
+    Stroke(logoBox, Config.NeonGlow, 1.3, 0.15)
+
     Label(logoBox, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0),
         Config.FontBold, 22, Config.NeonGlow, Enum.TextXAlignment.Center)
 
@@ -852,7 +950,7 @@ local function BuildUI()
         btn.Size = UDim2.new(1, -24, 0, 44)
         btn.Position = UDim2.new(0, 12, 0, 132 + (i - 1) * 50)
         btn.BackgroundColor3 = Config.BgCard
-        btn.BackgroundTransparency = 0.7
+        btn.BackgroundTransparency = 0.65
         btn.BorderSizePixel = 0
         btn.Text = ""
         btn.AutoButtonColor = false
@@ -860,10 +958,12 @@ local function BuildUI()
         btn.Parent = sidebar
         Corner(btn, 10)
 
+        Stroke(btn, Config.BtnInactiveBorder, 1, 0.5)
+
         local glow = Instance.new("Frame")
         glow.Size = UDim2.new(1, 0, 1, 0)
         glow.BackgroundColor3 = Config.NeonDeep
-        glow.BackgroundTransparency = 0.7
+        glow.BackgroundTransparency = 0.6
         glow.BorderSizePixel = 0
         glow.Visible = false
         glow.ZIndex = 1
@@ -898,12 +998,27 @@ local function BuildUI()
         }
     end
 
-    -- Content
+    -- ============ CONTENT (purple gradient, darker than sidebar) ============
     local content = Instance.new("Frame")
     content.Size = UDim2.new(1, -155, 1, 0)
     content.Position = UDim2.new(0, 155, 0, 0)
-    content.BackgroundTransparency = 1
+    content.BackgroundColor3 = Config.BgTop
+    content.BackgroundTransparency = Config.ContentTransparency
+    content.BorderSizePixel = 0
     content.Parent = win
+
+    -- Content gradient: lighter purple top → deep purple bottom
+    local contentGrad = Instance.new("UIGradient", content)
+    contentGrad.Rotation = 90
+    contentGrad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0.00, Config.BgTop),
+        ColorSequenceKeypoint.new(1.00, Config.BgBot),
+    })
+    contentGrad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0.0, Config.ContentTransparency),
+        NumberSequenceKeypoint.new(1.0, Config.ContentTransparency + 0.1),
+    })
+    contentGrad.Parent = content
 
     -- ============ MAIN PAGE ============
     local mainPage = Instance.new("Frame")
@@ -931,11 +1046,13 @@ local function BuildUI()
     local header = Instance.new("Frame")
     header.Size = UDim2.new(1, 0, 0, 46)
     header.BackgroundColor3 = Config.BgCard
+    header.BackgroundTransparency = Config.CardTransparency
     header.BorderSizePixel = 0
     header.LayoutOrder = 1
     header.Parent = scrollMain
     Corner(header, 10)
     Gradient(header, 90, ColorSequence.new(Config.BgCardHi, Config.BgCard))
+    Stroke(header, Config.NeonDeep, 1, 0.4)
 
     local dot = Instance.new("Frame")
     dot.Size = UDim2.new(0, 8, 0, 8)
@@ -968,15 +1085,17 @@ local function BuildUI()
         end
     end)
 
-    -- MODE card (with left accent bar)
+    -- MODE card
     local modeCard = Instance.new("Frame")
     modeCard.Size = UDim2.new(1, 0, 0, 106)
     modeCard.BackgroundColor3 = Config.BgCard
+    modeCard.BackgroundTransparency = Config.CardTransparency
     modeCard.BorderSizePixel = 0
     modeCard.LayoutOrder = 2
     modeCard.Parent = scrollMain
     Corner(modeCard, 10)
     Gradient(modeCard, 90, ColorSequence.new(Config.BgCardHi, Config.BgCard))
+    Stroke(modeCard, Config.NeonDeep, 1, 0.4)
     AccentBar(modeCard)
 
     Label(modeCard, "MODE",
@@ -990,39 +1109,49 @@ local function BuildUI()
         local mb = Instance.new("TextButton")
         mb.Size = UDim2.new(0, 82, 0, 32)
         mb.Position = UDim2.new(0, 20 + (i - 1) * 88, 0, 26)
-        mb.BackgroundColor3 = Color3.fromRGB(16, 8, 28)
-        mb.BackgroundTransparency = 0.3
+        mb.BackgroundColor3 = Config.BtnInactive
+        mb.BackgroundTransparency = 0.15
         mb.BorderSizePixel = 0
         mb.Text = m
         mb.Font = Config.FontBold
         mb.TextSize = 11
-        mb.TextColor3 = Config.TextDim
+        mb.TextColor3 = Config.Text
         mb.AutoButtonColor = false
         mb.ZIndex = 4
         mb.Parent = modeCard
         Corner(mb, 8)
 
-        modeBtns[m] = mb
+        local mbStroke = Instance.new("UIStroke", mb)
+        mbStroke.Color = Config.BtnInactiveBorder
+        mbStroke.Thickness = 1.2
+        mbStroke.Transparency = 0.35
+        mbStroke.Parent = mb
+
+        modeBtns[m] = { Btn = mb, Stroke = mbStroke }
 
         mb.MouseButton1Click:Connect(function()
             State.Mode = m
-            for key, btn in pairs(modeBtns) do
+            for key, data in pairs(modeBtns) do
                 local on = (key == State.Mode)
-                btn.BackgroundColor3 = on and Config.NeonDeep or Color3.fromRGB(16, 8, 28)
-                btn.BackgroundTransparency = on and 0.1 or 0.3
-                btn.TextColor3 = on and Config.Text or Config.TextDim
+                data.Btn.BackgroundColor3 = on and Config.NeonBright or Config.BtnInactive
+                data.Btn.BackgroundTransparency = on and 0.05 or 0.15
+                data.Btn.TextColor3 = on and Color3.new(1, 1, 1) or Config.Text
+                data.Stroke.Color = on and Config.NeonGlow or Config.BtnInactiveBorder
+                data.Stroke.Transparency = on and 0.1 or 0.35
             end
         end)
     end
 
-    for key, btn in pairs(modeBtns) do
+    for key, data in pairs(modeBtns) do
         local on = (key == State.Mode)
-        btn.BackgroundColor3 = on and Config.NeonDeep or Color3.fromRGB(16, 8, 28)
-        btn.BackgroundTransparency = on and 0.1 or 0.3
-        btn.TextColor3 = on and Config.Text or Config.TextDim
+        data.Btn.BackgroundColor3 = on and Config.NeonBright or Config.BtnInactive
+        data.Btn.BackgroundTransparency = on and 0.05 or 0.15
+        data.Btn.TextColor3 = on and Color3.new(1, 1, 1) or Config.Text
+        data.Stroke.Color = on and Config.NeonGlow or Config.BtnInactiveBorder
+        data.Stroke.Transparency = on and 0.1 or 0.35
     end
 
-    -- AUTO ROLL toggle row
+    -- Auto Roll toggle
     local arToggle = Toggle(modeCard, 66, "🎲 Auto Roll", State.Running, function(v)
         if v then StartDice() else StopDice() end
     end)
@@ -1032,11 +1161,13 @@ local function BuildUI()
     local speedCard = Instance.new("Frame")
     speedCard.Size = UDim2.new(1, 0, 0, 62)
     speedCard.BackgroundColor3 = Config.BgCard
+    speedCard.BackgroundTransparency = Config.CardTransparency
     speedCard.BorderSizePixel = 0
     speedCard.LayoutOrder = 3
     speedCard.Parent = scrollMain
     Corner(speedCard, 10)
     Gradient(speedCard, 90, ColorSequence.new(Config.BgCardHi, Config.BgCard))
+    Stroke(speedCard, Config.NeonDeep, 1, 0.4)
     AccentBar(speedCard)
 
     Slider(speedCard, 10, "Spam Speed", 20, 200, 33, " /sec", function(v)
@@ -1047,11 +1178,13 @@ local function BuildUI()
     local collectCard = Instance.new("Frame")
     collectCard.Size = UDim2.new(1, 0, 0, 62)
     collectCard.BackgroundColor3 = Config.BgCard
+    collectCard.BackgroundTransparency = Config.CardTransparency
     collectCard.BorderSizePixel = 0
     collectCard.LayoutOrder = 4
     collectCard.Parent = scrollMain
     Corner(collectCard, 10)
     Gradient(collectCard, 90, ColorSequence.new(Config.BgCardHi, Config.BgCard))
+    Stroke(collectCard, Config.NeonDeep, 1, 0.4)
     AccentBar(collectCard)
 
     Toggle(collectCard, 11, "💰 AFK Collect Money", State.AutoCollect, function(v)
@@ -1087,15 +1220,16 @@ local function BuildUI()
     setLayout.SortOrder = Enum.SortOrder.LayoutOrder
     setLayout.Parent = scrollSet
 
-    -- Header
     local sHeader = Instance.new("Frame")
     sHeader.Size = UDim2.new(1, 0, 0, 46)
     sHeader.BackgroundColor3 = Config.BgCard
+    sHeader.BackgroundTransparency = Config.CardTransparency
     sHeader.BorderSizePixel = 0
     sHeader.LayoutOrder = 1
     sHeader.Parent = scrollSet
     Corner(sHeader, 10)
     Gradient(sHeader, 90, ColorSequence.new(Config.BgCardHi, Config.BgCard))
+    Stroke(sHeader, Config.NeonDeep, 1, 0.4)
 
     Label(sHeader, "⚙  Settings",
         UDim2.new(1, -30, 1, 0), UDim2.new(0, 20, 0, 0),
@@ -1105,11 +1239,13 @@ local function BuildUI()
     local animCard = Instance.new("Frame")
     animCard.Size = UDim2.new(1, 0, 0, 102)
     animCard.BackgroundColor3 = Config.BgCard
+    animCard.BackgroundTransparency = Config.CardTransparency
     animCard.BorderSizePixel = 0
     animCard.LayoutOrder = 2
     animCard.Parent = scrollSet
     Corner(animCard, 10)
     Gradient(animCard, 90, ColorSequence.new(Config.BgCardHi, Config.BgCard))
+    Stroke(animCard, Config.NeonDeep, 1, 0.4)
     AccentBar(animCard)
 
     Toggle(animCard, 12, "Bypass Roll Animation", State.BypassAnim, function(v)
@@ -1120,34 +1256,17 @@ local function BuildUI()
         State.KillCutscene = v
     end)
 
-    -- Auto Skills section (demo, matching reference image)
-    local skillCard = Instance.new("Frame")
-    skillCard.Size = UDim2.new(1, 0, 0, 66)
-    skillCard.BackgroundColor3 = Config.BgCard
-    skillCard.BorderSizePixel = 0
-    skillCard.LayoutOrder = 3
-    skillCard.Parent = scrollSet
-    Corner(skillCard, 10)
-    Gradient(skillCard, 90, ColorSequence.new(Config.BgCardHi, Config.BgCard))
-    AccentBar(skillCard)
-
-    Label(skillCard, "Auto Skills",
-        UDim2.new(1, -60, 0, 18), UDim2.new(0, 20, 0, 12),
-        Config.FontBold, 12, Config.Text)
-
-    Label(skillCard, "Auto Use Skills",
-        UDim2.new(1, -60, 0, 14), UDim2.new(0, 20, 0, 32),
-        Config.Font, 10, Config.TextDim)
-
     -- Plot Range card
     local rangeCard = Instance.new("Frame")
     rangeCard.Size = UDim2.new(1, 0, 0, 76)
     rangeCard.BackgroundColor3 = Config.BgCard
+    rangeCard.BackgroundTransparency = Config.CardTransparency
     rangeCard.BorderSizePixel = 0
-    rangeCard.LayoutOrder = 4
+    rangeCard.LayoutOrder = 3
     rangeCard.Parent = scrollSet
     Corner(rangeCard, 10)
     Gradient(rangeCard, 90, ColorSequence.new(Config.BgCardHi, Config.BgCard))
+    Stroke(rangeCard, Config.NeonDeep, 1, 0.4)
     AccentBar(rangeCard)
 
     Label(rangeCard, "PLOT RANGE",
@@ -1164,7 +1283,7 @@ local function BuildUI()
         b.Size = UDim2.new(0, 52, 0, 26)
         b.Position = UDim2.new(0, xPos, 0, 44)
         b.BackgroundColor3 = Config.NeonDeep
-        b.BackgroundTransparency = 0.2
+        b.BackgroundTransparency = 0.1
         b.Text = txt
         b.Font = Config.FontBold
         b.TextSize = 10
@@ -1173,6 +1292,25 @@ local function BuildUI()
         b.ZIndex = 4
         b.Parent = rangeCard
         Corner(b, 8)
+
+        local bs = Instance.new("UIStroke", b)
+        bs.Color = Config.NeonBright
+        bs.Thickness = 1.2
+        bs.Transparency = 0.25
+        bs.Parent = b
+
+        b.MouseEnter:Connect(function()
+            Tween:Create(b, TweenInfo.new(0.15), {
+                BackgroundColor3 = Config.NeonBright,
+                BackgroundTransparency = 0.05,
+            }):Play()
+        end)
+        b.MouseLeave:Connect(function()
+            Tween:Create(b, TweenInfo.new(0.15), {
+                BackgroundColor3 = Config.NeonDeep,
+                BackgroundTransparency = 0.1,
+            }):Play()
+        end)
 
         b.MouseButton1Click:Connect(function()
             State.PlotMin = 1
@@ -1185,42 +1323,14 @@ local function BuildUI()
     RangeBtn("1 → 8", 78, 8)
     RangeBtn("1 → 16", 136, 16)
 
-    -- Checkbox demos
-    local checkCard = Instance.new("Frame")
-    checkCard.Size = UDim2.new(1, 0, 0, 90)
-    checkCard.BackgroundColor3 = Config.BgCard
-    checkCard.BorderSizePixel = 0
-    checkCard.LayoutOrder = 5
-    checkCard.Parent = scrollSet
-    Corner(checkCard, 10)
-    Gradient(checkCard, 90, ColorSequence.new(Config.BgCardHi, Config.BgCard))
-    AccentBar(checkCard)
-
-    Checkbox(checkCard, 8, "Enabled", true, function(v) print("Enabled:", v) end)
-    Checkbox(checkCard, 50, "Auto Active Clan Skill", true, function(v) print("Clan:", v) end)
-
-    -- Dropdown demo
-    local dropCard = Instance.new("Frame")
-    dropCard.Size = UDim2.new(1, 0, 0, 44)
-    dropCard.BackgroundColor3 = Config.BgCard
-    dropCard.BorderSizePixel = 0
-    dropCard.LayoutOrder = 6
-    dropCard.Parent = scrollSet
-    Corner(dropCard, 10)
-    Gradient(dropCard, 90, ColorSequence.new(Config.BgCardHi, Config.BgCard))
-    AccentBar(dropCard)
-
-    Dropdown(dropCard, 4, "Select Skills", { "Sword", "Bow", "Magic", "Heal" }, 1, function(opt)
-        print("Selected:", opt)
-    end)
-
     -- ============ PAGE SWITCH ============
     local function ApplyPage()
         for id, data in pairs(pageBtns) do
             local on = (id == State.Page)
             data.Glow.Visible = on
             data.Name.TextColor3 = on and Config.Text or Config.TextDim
-            data.Btn.BackgroundTransparency = on and 0.15 or 0.7
+            data.Btn.BackgroundTransparency = on and 0.2 or 0.65
+            data.Btn.BackgroundColor3 = on and Config.NeonDeep or Config.BgCard
         end
         mainPage.Visible = (State.Page == "MAIN")
         settingsPage.Visible = (State.Page == "SETTINGS")
@@ -1233,7 +1343,7 @@ local function BuildUI()
         end)
     end
 
-    -- Top buttons
+    -- ============ TOP BUTTONS ============
     local topBtns = Instance.new("Frame")
     topBtns.Size = UDim2.new(0, 60, 0, 22)
     topBtns.Position = UDim2.new(1, -70, 0, 10)
@@ -1245,7 +1355,7 @@ local function BuildUI()
     minBtn.Size = UDim2.new(0, 22, 0, 22)
     minBtn.Position = UDim2.new(0, 0, 0, 0)
     minBtn.BackgroundColor3 = Config.NeonDeep
-    minBtn.BackgroundTransparency = 0.3
+    minBtn.BackgroundTransparency = 0.2
     minBtn.BorderSizePixel = 0
     minBtn.Text = "—"
     minBtn.Font = Config.FontBold
@@ -1255,12 +1365,13 @@ local function BuildUI()
     minBtn.ZIndex = 11
     minBtn.Parent = topBtns
     Corner(minBtn, 999)
+    Stroke(minBtn, Config.NeonBright, 1, 0.3)
 
     local closeBtn = Instance.new("TextButton")
     closeBtn.Size = UDim2.new(0, 22, 0, 22)
     closeBtn.Position = UDim2.new(0, 32, 0, 0)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(80, 20, 35)
-    closeBtn.BackgroundTransparency = 0.15
+    closeBtn.BackgroundColor3 = Color3.fromRGB(140, 40, 60)
+    closeBtn.BackgroundTransparency = 0.1
     closeBtn.BorderSizePixel = 0
     closeBtn.Text = "✕"
     closeBtn.Font = Config.FontBold
@@ -1270,27 +1381,19 @@ local function BuildUI()
     closeBtn.ZIndex = 11
     closeBtn.Parent = topBtns
     Corner(closeBtn, 999)
-
-    local blur = Instance.new("BlurEffect")
-    blur.Name = "AxionHubBlur_Internal"
-    blur.Size = Config.BlurSize
-    blur.Parent = Lighting
-
-    gui.Destroying:Connect(function()
-        pcall(function() blur:Destroy() end)
-    end)
+    Stroke(closeBtn, Color3.fromRGB(255, 120, 140), 1, 0.3)
 
     minBtn.MouseButton1Click:Connect(function()
         State.Minimized = true
         win.Visible = false
         miniBtn.Visible = true
-        blur.Size = 0
+        guiBlur.Size = 0
     end)
 
     closeBtn.MouseButton1Click:Connect(function()
         pcall(StopDice)
         pcall(StopCollect)
-        pcall(function() blur:Destroy() end)
+        pcall(function() guiBlur:Destroy() end)
         pcall(function() gui:Destroy() end)
     end)
 
@@ -1298,7 +1401,7 @@ local function BuildUI()
         State.Minimized = false
         win.Visible = true
         miniBtn.Visible = false
-        blur.Size = Config.BlurSize
+        guiBlur.Size = Config.BlurSize
     end)
 
     -- Drag
