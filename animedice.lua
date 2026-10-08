@@ -1178,18 +1178,10 @@ local function buildUI()
 	createCorner(sidebar, CORNER_RADIUS + 4)
 	createGradient(sidebar, 90, ColorSequence.new(Config.sidebarTop, Config.sidebarBot))
 
-	local logoBox = Instance.new("Frame")
-	logoBox.Size = UDim2.new(0, 46, 0, 46)
-	logoBox.Position = UDim2.new(0, 16, 0, 18)
-	logoBox.BackgroundColor3 = WHITE
-	logoBox.BorderSizePixel = 0
-	logoBox.ZIndex = 3
-	logoBox.Parent = sidebar
-	createCorner(logoBox, CORNER_RADIUS)
-	spin(createGradient(logoBox, 45, accentSequence()), 70)
-	createStroke(logoBox, 1, 0.4)
-
-	makeIcon(logoBox, logo, UDim2.new(1, -8, 1, -8), UDim2.new(0, 4, 0, 4))
+	-- Big logo with no background while the window is open.
+	local sidebarLogo = makeIcon(sidebar, logo, UDim2.new(0, 68, 0, 68), UDim2.new(0, 12, 0, 4), WHITE)
+	sidebarLogo.ScaleType = Enum.ScaleType.Fit
+	sidebarLogo.ZIndex = 3
 
 	makeLabel(sidebar, "AxionHub", UDim2.new(1, -20, 0, 18), UDim2.new(0, 16, 0, 72), Config.fontBold, 15, Config.text)
 	makeLabel(sidebar, "AutoDice  " .. HUB_VERSION, UDim2.new(1, -20, 0, 14), UDim2.new(0, 16, 0, 90), Config.font, 10, Config.accentLight)
