@@ -17,13 +17,15 @@ local AxionHub = {
 }
 
 -- Constants.
-local HUB_VERSION = "v17"
+local HUB_VERSION = "v18"
 local WHITE = Color3.new(1, 1, 1)
 local SIDEBAR_WIDTH = 150
 local CORNER_RADIUS = 12
 local CONFIG_FOLDER = "AxionHub"
 local CONFIG_FILE = "AxionHub/config.json"
 local RELOAD_FILE = "AxionHub.lua"
+local LOGO_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/Untitled27_20261009042444.png"
+local LOGO_FILE = "AxionHub/logo.png"
 local SAFE_MAX_RATE = 30
 local WATCHDOG_TIMEOUT = 90
 local IDLE_PULSE_MIN = 90
@@ -42,6 +44,41 @@ local PERSIST_KEYS = {
 	"lowPower",
 	"antiKick",
 	"safeMode",
+	"uiSound",
+}
+
+local Icons = {
+	Logo = "rbxassetid://10709819149",
+	Search = "rbxassetid://10734943674",
+	Close = "rbxassetid://10747384394",
+	Minimize = "rbxassetid://10709791185",
+	Settings = "rbxassetid://10734950309",
+	ChevronDown = "rbxassetid://10709790948",
+	Palette = "rbxassetid://10734910430",
+	Save = "rbxassetid://10734941499",
+	Skull = "rbxassetid://10734962068",
+	Dashboard = "rbxassetid://10709752035",
+	Combat = "rbxassetid://10709818534",
+	Visuals = "rbxassetid://10747375132",
+	Teleport = "rbxassetid://10723404337",
+	Refresh = "rbxassetid://10734933222",
+	Server = "rbxassetid://10734963400",
+	Copy = "rbxassetid://10709812159",
+	Sound = "rbxassetid://10709810814",
+	SoundMute = "rbxassetid://10709810619",
+	Bell = "rbxassetid://10709752996",
+	Info = "rbxassetid://10709752996",
+	Check = "rbxassetid://10709790644",
+	Zap = "rbxassetid://10709791882",
+}
+
+local BubbleSoundMap = {
+	Click = { id = "rbxassetid://6895079853", pitch = 1.10, vol = 0.32 },
+	ToggleOn = { id = "rbxassetid://6895079853", pitch = 1.40, vol = 0.35 },
+	ToggleOff = { id = "rbxassetid://6895079853", pitch = 0.88, vol = 0.28 },
+	TabSwitch = { id = "rbxassetid://6895079853", pitch = 1.25, vol = 0.30 },
+	Dropdown = { id = "rbxassetid://6895079853", pitch = 1.00, vol = 0.30 },
+	Notify = { id = "rbxassetid://4590662766", pitch = 1.35, vol = 0.38 },
 }
 
 local cloneRef = cloneref or function(value)
@@ -60,6 +97,7 @@ local guiService = cloneRef(game:GetService("GuiService"))
 local httpService = cloneRef(game:GetService("HttpService"))
 local virtualUser = cloneRef(game:GetService("VirtualUser"))
 local coreGui = cloneRef(game:GetService("CoreGui"))
+local soundService = cloneRef(game:GetService("SoundService"))
 
 local localPlayer = playersService.LocalPlayer
 
@@ -135,6 +173,8 @@ local State = {
 	resumeCollect = false,
 	startTime = os.clock(),
 	origFps = 60,
+
+	uiSound = true,
 
 	minimized = false,
 	animating = false,
@@ -217,6 +257,51 @@ end
 local function track(connection)
 	table.insert(AxionHub.connections, connection)
 	return connection
+end
+
+---Play a short ui sound.
+local function playSound(name)
+	local info = BubbleSoundMap[name]
+	if not State.uiSound or not info then
+		return
+	end
+
+	task.spawn(function()
+		local sound = Instance.new("Sound")
+		sound.SoundId = info.id
+		sound.Volume = info.vol
+		sound.PlaybackSpeed = info.pitch
+		sound.Parent = soundService
+		sound:Play()
+
+		task.delay(3, function()
+			sound:Destroy()
+		end)
+	end)
+end
+
+---Download the logo through request, cache it, and turn it into an asset.
+local function resolveLogo()
+	if LOGO_URL == "" or not (getcustomasset and writefile and isfile) then
+		return Icons.Logo
+	end
+
+	if not isfile(LOGO_FILE) then
+		local ok, response = pcall(request, { Url = LOGO_URL, Method = "GET" })
+		if not ok or not response or not response.Success or #response.Body < 100 then
+			return Icons.Logo
+		end
+
+		pcall(function()
+			if makefolder and not isfolder(CONFIG_FOLDER) then
+				makefolder(CONFIG_FOLDER)
+			end
+			writefile(LOGO_FILE, response.Body)
+		end)
+	end
+
+	local ok, asset = pcall(getcustomasset, LOGO_FILE)
+	return ok and asset or Icons.Logo
 end
 
 -- Persistence.
@@ -757,6 +842,20 @@ local function createStroke(parent, thickness, transparency)
 	return stroke, gradient
 end
 
+---Image icon used across the interface.
+local function makeIcon(parent, image, size, position, color)
+	local icon = Instance.new("ImageLabel")
+	icon.Size = size
+	icon.Position = position
+	icon.Image = image
+	icon.ImageColor3 = color or WHITE
+	icon.BackgroundTransparency = 1
+	icon.BorderSizePixel = 0
+	icon.ZIndex = 8
+	icon.Parent = parent
+	return icon
+end
+
 local function makeLabel(parent, text, size, position, font, textSize, color, alignment)
 	local label = Instance.new("TextLabel")
 	label.Text = text
@@ -955,7 +1054,7 @@ local function stylePill(parts, on, instant)
 	tween(parts.knob, 0.3, knobGoal, Enum.EasingStyle.Back)
 end
 
-local function makeToggle(parent, y, title, defaultOn, callback)
+local function makeToggle(parent, y, title, defaultOn, callback, iconImage)
 	local row = Instance.new("Frame")
 	row.Size = UDim2.new(1, 0, 0, 40)
 	row.Position = UDim2.new(0, 0, 0, y)
@@ -963,7 +1062,12 @@ local function makeToggle(parent, y, title, defaultOn, callback)
 	row.ZIndex = 4
 	row.Parent = parent
 
-	makeLabel(row, title, UDim2.new(0.7, 0, 1, 0), UDim2.new(0, 14, 0, 0), Config.fontMedium, 12, Config.text)
+	local icon
+	if iconImage then
+		icon = makeIcon(row, iconImage, UDim2.new(0, 18, 0, 18), UDim2.new(0, 14, 0.5, -9), Config.accentLight)
+	end
+
+	makeLabel(row, title, UDim2.new(0.7, 0, 1, 0), UDim2.new(0, iconImage and 40 or 14, 0, 0), Config.fontMedium, 12, Config.text)
 
 	local parts = buildPill(row, UDim2.new(1, -60, 0.5, -12))
 	local on = defaultOn
@@ -972,12 +1076,14 @@ local function makeToggle(parent, y, title, defaultOn, callback)
 	track(parts.pill.MouseButton1Click:Connect(function()
 		on = not on
 		stylePill(parts, on)
+		playSound(on and "ToggleOn" or "ToggleOff")
 		if callback then
 			callback(on)
 		end
 	end))
 
 	return {
+		icon = icon,
 		set = function(value)
 			on = value
 			stylePill(parts, on)
@@ -988,6 +1094,7 @@ end
 ---Build the whole interface.
 local function buildUI()
 	local parent = safeParent()
+	local logo = resolveLogo()
 
 	local gui = Instance.new("ScreenGui")
 	gui.Name = randomName()
@@ -1019,7 +1126,7 @@ local function buildUI()
 	miniScale.Scale = 0
 	miniScale.Parent = miniBtn
 
-	makeLabel(miniBtn, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 22, Config.text, Enum.TextXAlignment.Center)
+	makeIcon(miniBtn, logo, UDim2.new(1, -12, 1, -12), UDim2.new(0, 6, 0, 6))
 
 	-- Scale the window to fit any screen (phone, tablet, pc).
 	local function getBaseScale()
@@ -1082,7 +1189,7 @@ local function buildUI()
 	spin(createGradient(logoBox, 45, accentSequence()), 70)
 	createStroke(logoBox, 1, 0.4)
 
-	makeLabel(logoBox, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 22, Config.text, Enum.TextXAlignment.Center)
+	makeIcon(logoBox, logo, UDim2.new(1, -8, 1, -8), UDim2.new(0, 4, 0, 4))
 
 	makeLabel(sidebar, "AxionHub", UDim2.new(1, -20, 0, 18), UDim2.new(0, 16, 0, 72), Config.fontBold, 15, Config.text)
 	makeLabel(sidebar, "AutoDice  " .. HUB_VERSION, UDim2.new(1, -20, 0, 14), UDim2.new(0, 16, 0, 90), Config.font, 10, Config.accentLight)
@@ -1091,9 +1198,9 @@ local function buildUI()
 	local shieldLabel = makeLabel(sidebar, "● protected", UDim2.new(1, -20, 0, 12), UDim2.new(0, 16, 1, -24), Config.font, 9, Config.good)
 
 	local pages = {
-		{ id = "MAIN", icon = "🏠", label = "Main", desc = "dice & collect" },
-		{ id = "SETTINGS", icon = "⚙", label = "Settings", desc = "animation / range" },
-		{ id = "AFK", icon = "🛡", label = "AFK & Safe", desc = "24/7 · anti-ban" },
+		{ id = "MAIN", icon = Icons.Dashboard, label = "Main", desc = "dice & collect" },
+		{ id = "SETTINGS", icon = Icons.Settings, label = "Settings", desc = "animation / range" },
+		{ id = "AFK", icon = Icons.Server, label = "AFK & Safe", desc = "24/7 · anti-ban" },
 	}
 
 	local pageButtons = {}
@@ -1119,8 +1226,7 @@ local function buildUI()
 		badge.Parent = chip.button
 		createCorner(badge, 999)
 
-		local icon = makeLabel(badge, page.icon, UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 14, Config.accentLight, Enum.TextXAlignment.Center)
-		icon.ZIndex = 7
+		makeIcon(badge, page.icon, UDim2.new(0, 16, 0, 16), UDim2.new(0.5, -8, 0.5, -8), Config.accentLight)
 
 		local nameLabel = makeLabel(chip.button, page.label, UDim2.new(1, -50, 0, 14), UDim2.new(0, 44, 0, 7), Config.fontBold, 11.5, Config.textDim)
 		nameLabel.ZIndex = 6
@@ -1163,6 +1269,10 @@ local function buildUI()
 	toastLabel.ZIndex = 21
 	toastLabel.TextTransparency = 1
 
+	local toastIcon = makeIcon(toast, Icons.Bell, UDim2.new(0, 14, 0, 14), UDim2.new(0, 12, 0.5, -7), Config.text)
+	toastIcon.ImageTransparency = 1
+	toastIcon.ZIndex = 22
+
 	local toastToken = 0
 
 	notify = function(text, color)
@@ -1171,11 +1281,14 @@ local function buildUI()
 
 		toastLabel.Text = text
 		toastLabel.TextColor3 = color or Config.text
+		toastIcon.Image = color == Config.good and Icons.Check or Icons.Bell
 		toast.Position = UDim2.new(0.5, 0, 0, 420)
 
 		tween(toast, 0.35, { Position = UDim2.new(0.5, 0, 0, 372), BackgroundTransparency = 0.1 }, Enum.EasingStyle.Back)
 		tween(toastLabel, 0.25, { TextTransparency = 0 })
 		tween(toastStroke, 0.25, { Transparency = 0.4 })
+		tween(toastIcon, 0.25, { ImageTransparency = 0 })
+		playSound("Notify")
 
 		task.delay(2.2, function()
 			if token ~= toastToken or not AxionHub.alive then
@@ -1185,6 +1298,7 @@ local function buildUI()
 			tween(toast, 0.3, { Position = UDim2.new(0.5, 0, 0, 420), BackgroundTransparency = 1 })
 			tween(toastLabel, 0.25, { TextTransparency = 1 })
 			tween(toastStroke, 0.25, { Transparency = 1 })
+			tween(toastIcon, 0.25, { ImageTransparency = 1 })
 		end)
 	end
 
@@ -1233,6 +1347,7 @@ local function buildUI()
 		addHover(chip)
 
 		track(chip.button.MouseButton1Click:Connect(function()
+			playSound("Click")
 			State.mode = mode
 			refreshModes()
 			saveConfig()
@@ -1244,7 +1359,7 @@ local function buildUI()
 	end
 	modeDesc.Text = MODE_INFO[State.mode]
 
-	uiRefs.autoRoll = makeToggle(modeCard, 88, "🎲 Auto Roll", false, function(value)
+	uiRefs.autoRoll = makeToggle(modeCard, 88, "Auto Roll", false, function(value)
 		if value then
 			startDice()
 		else
@@ -1253,7 +1368,7 @@ local function buildUI()
 
 		uiRefs.autoRoll.set(State.running)
 		saveConfig()
-	end)
+	end, Icons.Zap)
 
 	-- Speed card.
 	local speedCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 212))
@@ -1328,6 +1443,7 @@ local function buildUI()
 	track(sliderTrack.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			draggingSlider = true
+			playSound("Click")
 			setFromX(input.Position.X)
 			tween(sliderKnob, 0.15, { Size = UDim2.new(0, 20, 0, 20) })
 		end
@@ -1355,7 +1471,7 @@ local function buildUI()
 	-- Collect card.
 	local collectCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 284))
 
-	uiRefs.collect = makeToggle(collectCard, 4, "💰 AFK Collect Money", State.autoCollect, function(value)
+	uiRefs.collect = makeToggle(collectCard, 4, "AFK Collect Money", State.autoCollect, function(value)
 		if value then
 			startCollect()
 		else
@@ -1364,7 +1480,7 @@ local function buildUI()
 
 		uiRefs.collect.set(State.autoCollect)
 		saveConfig()
-	end)
+	end, Icons.Save)
 
 	makeLabel(
 		collectCard,
@@ -1379,21 +1495,29 @@ local function buildUI()
 	-- Settings page.
 	local settingsHeader = makeCard(settingsPage, UDim2.new(1, -90, 0, 42), UDim2.new(0, 18, 0, 16))
 
-	makeLabel(settingsHeader, "⚙  Settings", UDim2.new(1, -30, 1, 0), UDim2.new(0, 16, 0, 0), Config.fontBold, 12, Config.text)
+	makeIcon(settingsHeader, Icons.Settings, UDim2.new(0, 16, 0, 16), UDim2.new(0, 16, 0.5, -8), Config.accentLight)
+	makeLabel(settingsHeader, "Settings", UDim2.new(1, -50, 1, 0), UDim2.new(0, 40, 0, 0), Config.fontBold, 12, Config.text)
 
-	local settingsCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 92), UDim2.new(0, 18, 0, 70))
+	local settingsCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 136), UDim2.new(0, 18, 0, 70))
 
 	makeToggle(settingsCard, 4, "Bypass Roll Animation", State.bypassAnim, function(value)
 		State.bypassAnim = value
 		saveConfig()
-	end)
+	end, Icons.Visuals)
 
 	makeToggle(settingsCard, 48, "Kill Camera Cutscene", State.killCutscene, function(value)
 		State.killCutscene = value
 		saveConfig()
-	end)
+	end, Icons.Skull)
 
-	local rangeCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 80), UDim2.new(0, 18, 0, 172))
+	local soundToggle
+	soundToggle = makeToggle(settingsCard, 92, "UI Sounds", State.uiSound, function(value)
+		State.uiSound = value
+		soundToggle.icon.Image = value and Icons.Sound or Icons.SoundMute
+		saveConfig()
+	end, State.uiSound and Icons.Sound or Icons.SoundMute)
+
+	local rangeCard = makeCard(settingsPage, UDim2.new(1, -36, 0, 80), UDim2.new(0, 18, 0, 216))
 
 	makeLabel(rangeCard, "PLOT RANGE", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
 
@@ -1413,6 +1537,7 @@ local function buildUI()
 		addHover(chip)
 
 		track(chip.button.MouseButton1Click:Connect(function()
+			playSound("Click")
 			State.plotMin = 1
 			State.plotMax = value
 			rangeValue.Text = string.format("1 → %d", State.plotMax)
@@ -1432,16 +1557,29 @@ local function buildUI()
 	-- AFK & protection page.
 	local afkHeader = makeCard(afkPage, UDim2.new(1, -90, 0, 42), UDim2.new(0, 18, 0, 16))
 
-	makeLabel(afkHeader, "🛡  AFK 24/7 & Protection", UDim2.new(1, -30, 1, 0), UDim2.new(0, 16, 0, 0), Config.fontBold, 12, Config.text)
+	makeIcon(afkHeader, Icons.Server, UDim2.new(0, 16, 0, 16), UDim2.new(0, 16, 0.5, -8), Config.accentLight)
+	makeLabel(afkHeader, "AFK 24/7 & Protection", UDim2.new(1, -50, 1, 0), UDim2.new(0, 40, 0, 0), Config.fontBold, 12, Config.text)
 
 	local sessionCard = makeCard(afkPage, UDim2.new(1, -36, 0, 50), UDim2.new(0, 18, 0, 66))
 
 	makeLabel(sessionCard, "SESSION", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 6), Config.fontBold, 9.5, Config.accentLight)
 	local sessionLabel = makeLabel(sessionCard, "", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 24), Config.fontMedium, 11, Config.text)
 
+	local copyChip = makeChip(sessionCard, UDim2.new(0, 28, 0, 28), UDim2.new(1, -42, 0, 11), "", 10, 999)
+	addHover(copyChip)
+	makeIcon(copyChip.button, Icons.Copy, UDim2.new(0, 14, 0, 14), UDim2.new(0.5, -7, 0.5, -7), Config.text)
+
+	track(copyChip.button.MouseButton1Click:Connect(function()
+		playSound("Click")
+		if setclipboard then
+			setclipboard(sessionLabel.Text .. string.format(" · rolls: %d · collected: %d", State.rolls, State.collected))
+			notify("Copied session stats", Config.good)
+		end
+	end))
+
 	local switchCard = makeCard(afkPage, UDim2.new(1, -36, 0, 236), UDim2.new(0, 18, 0, 124))
 
-	local function addSwitch(y, title, key, onChange)
+	local function addSwitch(y, title, key, icon, onChange)
 		return makeToggle(switchCard, y, title, State[key], function(value)
 			State[key] = value
 
@@ -1451,15 +1589,15 @@ local function buildUI()
 
 			saveConfig()
 			notify(title .. (value and "  ON" or "  OFF"), value and Config.good or Config.muted)
-		end)
+		end, icon)
 	end
 
-	addSwitch(4, "💤 Anti-AFK (no idle kick)", "antiAfk")
-	addSwitch(42, "🔁 Auto Reconnect", "autoReconnect")
-	addSwitch(80, "▶ Auto Resume after rejoin", "autoResume")
-	addSwitch(118, "🔋 Low Power Mode", "lowPower", applyLowPower)
-	addSwitch(156, "🚫 Anti-Kick (client)", "antiKick")
-	addSwitch(194, "🕶 Safe Mode (human timing)", "safeMode", function()
+	addSwitch(4, "Anti-AFK (no idle kick)", "antiAfk", Icons.Bell)
+	addSwitch(42, "Auto Reconnect", "autoReconnect", Icons.Refresh)
+	addSwitch(80, "Auto Resume after rejoin", "autoResume", Icons.Teleport)
+	addSwitch(118, "Low Power Mode", "lowPower", Icons.Palette, applyLowPower)
+	addSwitch(156, "Anti-Kick (client)", "antiKick", Icons.Combat)
+	addSwitch(194, "Safe Mode (human timing)", "safeMode", Icons.Info, function()
 		updateSpeedText()
 	end)
 
@@ -1518,6 +1656,7 @@ local function buildUI()
 				return
 			end
 
+			playSound("TabSwitch")
 			State.page = id
 			applyPage()
 		end))
@@ -1531,8 +1670,9 @@ local function buildUI()
 	topButtons.ZIndex = 10
 	topButtons.Parent = content
 
-	local minChip = makeChip(topButtons, UDim2.new(0, 22, 0, 22), UDim2.new(0, 0, 0, 0), "—", 13, 999)
+	local minChip = makeChip(topButtons, UDim2.new(0, 22, 0, 22), UDim2.new(0, 0, 0, 0), "", 13, 999)
 	minChip.button.ZIndex = 11
+	makeIcon(minChip.button, Icons.Minimize, UDim2.new(0, 12, 0, 12), UDim2.new(0.5, -6, 0.5, -6), Config.text).ZIndex = 12
 	styleChip(minChip, false, true)
 	addHover(minChip)
 
@@ -1541,7 +1681,7 @@ local function buildUI()
 	closeBtn.Position = UDim2.new(0, 32, 0, 0)
 	closeBtn.BackgroundColor3 = Color3.fromRGB(120, 32, 62)
 	closeBtn.BorderSizePixel = 0
-	closeBtn.Text = "✕"
+	closeBtn.Text = ""
 	closeBtn.Font = Config.fontBold
 	closeBtn.TextSize = 12
 	closeBtn.TextColor3 = Config.text
@@ -1549,6 +1689,7 @@ local function buildUI()
 	closeBtn.ZIndex = 11
 	closeBtn.Parent = topButtons
 	createCorner(closeBtn, 999)
+	makeIcon(closeBtn, Icons.Close, UDim2.new(0, 12, 0, 12), UDim2.new(0.5, -6, 0.5, -6), Config.text).ZIndex = 12
 
 	track(closeBtn.MouseEnter:Connect(function()
 		tween(closeBtn, 0.15, { BackgroundColor3 = Color3.fromRGB(190, 48, 92) })
@@ -1608,6 +1749,7 @@ local function buildUI()
 			return
 		end
 
+		playSound("Dropdown")
 		State.minimized = true
 		hideWindow(function()
 			miniBtn.Visible = true
@@ -1621,6 +1763,7 @@ local function buildUI()
 			return
 		end
 
+		playSound("Dropdown")
 		tween(miniScale, 0.2, { Scale = 0 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 		task.delay(0.2, function()
 			miniBtn.Visible = false
@@ -1635,6 +1778,8 @@ local function buildUI()
 		if State.animating then
 			return
 		end
+
+		playSound("Click")
 
 		-- Stop first so the saved config does not auto resume next run.
 		pcall(stopDice)
@@ -1825,7 +1970,7 @@ local function initializeScript()
 			end
 
 			if State.resumeRoll or State.resumeCollect then
-				notify("▶ Resumed after rejoin", Config.good)
+				notify("Resumed after rejoin", Config.good)
 			end
 		end)
 	end
