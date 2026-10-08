@@ -788,9 +788,9 @@ local function makeCard(parent, size, position)
 	return card
 end
 
----A page is a CanvasGroup so it can fade as one piece.
+---A page is a plain frame that slides in.
 local function makePage(parent)
-	local page = Instance.new("CanvasGroup")
+	local page = Instance.new("Frame")
 	page.Size = UDim2.new(1, 0, 1, 0)
 	page.BackgroundTransparency = 1
 	page.BorderSizePixel = 0
@@ -1021,8 +1021,16 @@ local function buildUI()
 
 	makeLabel(miniBtn, "◆", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Config.fontBold, 22, Config.text, Enum.TextXAlignment.Center)
 
-	-- Window is a CanvasGroup so the whole thing fades and scales.
-	local win = Instance.new("CanvasGroup")
+	-- Scale the window to fit any screen (phone, tablet, pc).
+	local function getBaseScale()
+		local camera = workspace.CurrentCamera
+		local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+		return math.clamp(math.min(viewport.X * 0.9 / 590, viewport.Y * 0.78 / 410, 1), 0.4, 1)
+	end
+
+	local baseScale = getBaseScale()
+
+	local win = Instance.new("Frame")
 	win.Name = "Window"
 	win.Size = UDim2.new(0, 590, 0, 410)
 	win.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -1030,7 +1038,7 @@ local function buildUI()
 	win.BackgroundColor3 = WHITE
 	win.BackgroundTransparency = 0.04
 	win.BorderSizePixel = 0
-	win.GroupTransparency = 1
+	win.ClipsDescendants = true
 	win.Active = true
 	win.Parent = gui
 	createCorner(win, CORNER_RADIUS + 4)
@@ -1039,8 +1047,19 @@ local function buildUI()
 	spin(winStrokeGradient, 35)
 
 	local winScale = Instance.new("UIScale")
-	winScale.Scale = 0.85
+	winScale.Scale = baseScale * 0.85
 	winScale.Parent = win
+
+	-- Veil fades the whole window in and out.
+	local veil = Instance.new("Frame")
+	veil.Size = UDim2.new(1, 0, 1, 0)
+	veil.BackgroundColor3 = Config.bgBot
+	veil.BackgroundTransparency = 0
+	veil.BorderSizePixel = 0
+	veil.Active = false
+	veil.ZIndex = 100
+	veil.Parent = win
+	createCorner(veil, CORNER_RADIUS + 4)
 
 	local sidebar = Instance.new("Frame")
 	sidebar.Size = UDim2.new(0, SIDEBAR_WIDTH, 1, 0)
@@ -1484,13 +1503,11 @@ local function buildUI()
 				frame.Visible = false
 			elseif instant then
 				frame.Position = UDim2.new()
-				frame.GroupTransparency = 0
 				frame.Visible = true
 			else
 				frame.Position = UDim2.new(0, 0, 0, 16)
-				frame.GroupTransparency = 1
 				frame.Visible = true
-				tween(frame, 0.35, { Position = UDim2.new(), GroupTransparency = 0 }, Enum.EasingStyle.Quart)
+				tween(frame, 0.35, { Position = UDim2.new() }, Enum.EasingStyle.Quart)
 			end
 		end
 	end
@@ -1553,8 +1570,9 @@ local function buildUI()
 		State.animating = true
 
 		win.Visible = true
-		tween(winScale, 0.5, { Scale = 1 }, Enum.EasingStyle.Back)
-		tween(win, 0.3, { GroupTransparency = 0 })
+		baseScale = getBaseScale()
+		tween(winScale, 0.5, { Scale = baseScale }, Enum.EasingStyle.Back)
+		tween(veil, 0.35, { BackgroundTransparency = 1 })
 		tween(winStroke, 0.3, { Transparency = 0.15 })
 		tween(blur, 0.4, { Size = Config.blurSize })
 
@@ -1566,8 +1584,8 @@ local function buildUI()
 	local function hideWindow(onDone)
 		State.animating = true
 
-		tween(winScale, 0.25, { Scale = 0.85 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-		tween(win, 0.25, { GroupTransparency = 1 })
+		tween(winScale, 0.25, { Scale = baseScale * 0.85 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		tween(veil, 0.25, { BackgroundTransparency = 0 })
 		tween(winStroke, 0.25, { Transparency = 1 })
 		tween(blur, 0.25, { Size = 0 })
 
@@ -1673,6 +1691,17 @@ local function buildUI()
 			draggingWindow = false
 		end
 	end))
+
+	-- Keep the size correct when the screen changes (rotate, resize).
+	local camera = workspace.CurrentCamera
+	if camera then
+		track(camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+			baseScale = getBaseScale()
+			if not State.animating and not State.minimized then
+				winScale.Scale = baseScale
+			end
+		end))
+	end
 
 	applyPage(true)
 	showWindow()
