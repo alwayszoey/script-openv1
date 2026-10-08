@@ -26,6 +26,18 @@ local Theme = {
 	control = Color3.fromRGB(38, 36, 39),
 	accent = Color3.fromRGB(226, 62, 72),
 	accentDark = Color3.fromRGB(96, 26, 34),
+
+	-- Gradient endpoints.
+	windowTop = Color3.fromRGB(28, 25, 30),
+	windowBottom = Color3.fromRGB(9, 8, 11),
+	sidebarTop = Color3.fromRGB(20, 18, 22),
+	sidebarBottom = Color3.fromRGB(7, 6, 8),
+	tabLeft = Color3.fromRGB(170, 40, 50),
+	tabRight = Color3.fromRGB(40, 14, 18),
+	cardLeft = Color3.fromRGB(66, 26, 32),
+	cardRight = Color3.fromRGB(26, 22, 25),
+	fillLeft = Color3.fromRGB(120, 28, 38),
+	fillRight = Color3.fromRGB(240, 76, 86),
 	text = Color3.fromRGB(236, 236, 238),
 	muted = Color3.fromRGB(150, 150, 156),
 	font = Enum.Font.Gotham,
@@ -57,6 +69,25 @@ end
 ---Round the corners of an instance.
 local function corner(parent, radius)
 	return create("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+end
+
+---Add a gradient. Never use on buttons that have text, it tints the text.
+---@param parent Instance
+---@param rotation number
+---@param from Color3
+---@param to Color3
+---@param transparency NumberSequence?
+local function gradient(parent, rotation, from, to, transparency)
+	local object = create("UIGradient", {
+		Rotation = rotation,
+		Color = ColorSequence.new(from, to),
+	}, parent)
+
+	if transparency then
+		object.Transparency = transparency
+	end
+
+	return object
 end
 
 ---Short tween helper.
@@ -125,20 +156,22 @@ function Library.new(title, version)
 		Name = "Window",
 		Size = WINDOW_SIZE,
 		Position = UDim2.new(0.5, -410, 0.5, -240),
-		BackgroundColor3 = Theme.window,
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = 0.04,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 	}, self.gui)
 	corner(self.window, 10)
+	gradient(self.window, 90, Theme.windowTop, Theme.windowBottom)
 
 	-- Sidebar.
 	self.sidebar = create("Frame", {
 		Size = UDim2.new(0, SIDEBAR_WIDTH, 1, 0),
-		BackgroundColor3 = Theme.sidebar,
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = 0.1,
 		BorderSizePixel = 0,
 	}, self.window)
+	gradient(self.sidebar, 90, Theme.sidebarTop, Theme.sidebarBottom)
 
 	label(self.sidebar, title .. " (" .. version .. ")", UDim2.new(0, 16, 0, 10), UDim2.new(1, -24, 0, 18), Theme.fontMedium, 11, Theme.muted)
 
@@ -275,13 +308,26 @@ function Library:addTab(name, icon)
 
 	tab.button = create("TextButton", {
 		Size = UDim2.new(1, 0, 0, 38),
-		BackgroundColor3 = Theme.accentDark,
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = 1,
 		Text = "",
 		AutoButtonColor = false,
 		LayoutOrder = self.order,
 	}, self.tabList)
 	corner(tab.button, 6)
+
+	-- Text is empty on this button, so the gradient is safe here.
+	gradient(
+		tab.button,
+		0,
+		Theme.tabLeft,
+		Theme.tabRight,
+		NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0),
+			NumberSequenceKeypoint.new(0.6, 0.4),
+			NumberSequenceKeypoint.new(1, 0.85),
+		})
+	)
 
 	tab.bar = create("Frame", {
 		Size = UDim2.new(0, 3, 0, 20),
@@ -328,7 +374,7 @@ function Library:selectTab(selected)
 		tab.page.Visible = on
 		tab.bar.Visible = on
 		tab.name.TextColor3 = on and Theme.text or Theme.muted
-		tween(tab.button, 0.15, { BackgroundTransparency = on and 0.35 or 1 })
+		tween(tab.button, 0.15, { BackgroundTransparency = on and 0 or 1 })
 	end
 end
 
@@ -438,7 +484,8 @@ end
 
 ---Large section header with icon, subtitle and a switch.
 function Column:addHeader(icon, title, subtitle, default, callback)
-	local row = self:row(50, Theme.card)
+	local row = self:row(50, Color3.new(1, 1, 1))
+	gradient(row, 0, Theme.cardLeft, Theme.cardRight)
 
 	label(row, icon, UDim2.new(0, 12, 0, 0), UDim2.new(0, 26, 1, 0), Theme.fontBold, 18, Theme.accent, Enum.TextXAlignment.Center)
 	label(row, title, UDim2.new(0, 48, 0, 8), UDim2.new(1, -110, 0, 16), Theme.fontBold, 13, Theme.text)
@@ -534,10 +581,11 @@ function Column:addSlider(text, minValue, maxValue, default, suffix, callback)
 
 	local fill = create("Frame", {
 		Size = UDim2.new(0, 0, 1, 0),
-		BackgroundColor3 = Theme.accent,
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BorderSizePixel = 0,
 	}, trackBar)
 	corner(fill, 999)
+	gradient(fill, 0, Theme.fillLeft, Theme.fillRight)
 
 	local knob = create("Frame", {
 		Size = UDim2.new(0, 10, 0, 14),
