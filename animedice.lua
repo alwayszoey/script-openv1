@@ -1,10 +1,10 @@
 --[[
-    AxionHub AutoDice v4
-    Changelog v3 → v4:
-      ✔ Deep purple → black gradient (เข้มขึ้น)
-      ✔ Glass morphism UI (Glass material + blur + glow stroke)
-      ✔ Auto Collect Money (ยืนเฉยๆ เงินเด้งเข้าตัว)
-      ✔ คงทุกระบบ v3 ไว้ครบ
+    AxionHub AutoDice v6
+    Changelog v5 → v6:
+      ✔ Auto Collect ทำงาน AFK จริง (background thread, เริ่มทันที)
+      ✔ เก็บทุก plot 1–16 ตลอดเวลา ไม่ต้องขยับตัว
+      ✔ UI เปลี่ยนเป็น gray→black gradient (ตามภาพ)
+      ✔ ลด overhead — ทำงานได้เสถียรตอน AFK นานๆ
 --]]
 
 local Players           = game:GetService("Players")
@@ -18,43 +18,43 @@ local Workspace         = game:GetService("Workspace")
 local LP = Players.LocalPlayer
 local RS = ReplicatedStorage
 
-print("[AxionHub] ===== v4 starting =====")
+print("[AxionHub] ===== v6 starting =====")
 
 --=====================================================================
--- THEME :: DEEP PURPLE → BLACK (เข้มขึ้น + glass-ready)
+-- THEME :: DARK GRAY → BLACK (ตามที่ขอ)
 --=====================================================================
 local Theme = {
-    -- Bg gradient ม่วงดำเข้ม (เข้มกว่า v3)
-    Bg1      = Color3.fromRGB(14,  4,  28),   -- deep violet เกือบดำ
-    Bg2      = Color3.fromRGB(7,   2,  14),
-    Bg3      = Color3.fromRGB(2,   0,   4),   -- near black
+    -- พื้นหลังเทาเข้ม → ดำ
+    Bg1      = Color3.fromRGB(38,  38,  42),    -- เทาเข้ม (ด้านบน)
+    Bg2      = Color3.fromRGB(20,  20,  24),
+    Bg3      = Color3.fromRGB(4,   4,   6),     -- ดำ (ด้านล่าง)
 
-    -- Glass surfaces
-    Glass    = Color3.fromRGB(28,  12, 48),
-    GlassHi  = Color3.fromRGB(48,  20, 78),
+    Glass    = Color3.fromRGB(45,  45,  52),
+    GlassHi  = Color3.fromRGB(65,  65,  75),
 
-    Sidebar  = Color3.fromRGB(10,  4,  20),
-    Card     = Color3.fromRGB(24,  10, 44),
-    CardHi   = Color3.fromRGB(38,  16, 66),
+    Sidebar  = Color3.fromRGB(28,  28,  32),
+    Card     = Color3.fromRGB(48,  48,  56),
+    CardHi   = Color3.fromRGB(70,  70,  82),
 
-    Border   = Color3.fromRGB(88,  44, 148),
-    BorderLt = Color3.fromRGB(150, 82, 240),
+    Border   = Color3.fromRGB(100, 100, 115),
+    BorderLt = Color3.fromRGB(160, 160, 180),
 
-    Accent   = Color3.fromRGB(168, 85, 247),
-    Accent2  = Color3.fromRGB(124, 58, 237),
-    AccentLt = Color3.fromRGB(220, 190, 255),
-    AccentGl = Color3.fromRGB(200, 130, 255),
+    -- คง accent ม่วงไว้ (สวย ตัดกับเทาดำ)
+    Accent   = Color3.fromRGB(150, 100, 240),
+    Accent2  = Color3.fromRGB(110, 70, 220),
+    AccentLt = Color3.fromRGB(200, 175, 255),
 
-    Text     = Color3.fromRGB(248, 244, 255),
-    TextDim  = Color3.fromRGB(190, 170, 225),
-    Muted    = Color3.fromRGB(130, 110, 165),
+    Text     = Color3.fromRGB(245, 245, 250),
+    TextDim  = Color3.fromRGB(180, 180, 195),
+    Muted    = Color3.fromRGB(120, 120, 135),
 
-    Good     = Color3.fromRGB(130, 255, 180),
-    Bad      = Color3.fromRGB(255, 100, 130),
+    Good     = Color3.fromRGB(140, 240, 170),
+    Bad      = Color3.fromRGB(255, 110, 130),
+    Gold     = Color3.fromRGB(255, 200, 80),
 }
 
 --=====================================================================
--- SAFE GUI PARENT
+-- SAFE PARENT / FIND
 --=====================================================================
 local function getSafeGuiParent()
     if type(gethui) == "function" then
@@ -64,9 +64,6 @@ local function getSafeGuiParent()
     return game:GetService("CoreGui")
 end
 
---=====================================================================
--- SAFE REMOTE FINDER
---=====================================================================
 local function safeFind(root, ...)
     local node = root
     for _, name in ipairs({...}) do
@@ -81,68 +78,41 @@ end
 local RollDice    = safeFind(RS, "Network", "RollService", "RF", "RollDice")
 local SetAutoRoll = safeFind(RS, "Network", "RollService", "RE", "SetAutoRoll")
 local RollMessage = safeFind(RS, "Network", "RollService", "RE", "RollMessage")
+local CollectBalance = safeFind(RS, "Network", "PlotService", "RE", "CollectBalance")
 
-print("[AxionHub] RollDice    =", RollDice)
-print("[AxionHub] SetAutoRoll =", SetAutoRoll)
-print("[AxionHub] RollMessage =", RollMessage)
+print("[AxionHub] RollDice       =", RollDice)
+print("[AxionHub] SetAutoRoll    =", SetAutoRoll)
+print("[AxionHub] CollectBalance =", CollectBalance)
 
 local remotesReady = RollDice ~= nil and SetAutoRoll ~= nil
-if not remotesReady then
-    warn("[AxionHub] Remotes NOT found — UI will load disabled.")
-end
-
---=====================================================================
--- 💰 AUTO COLLECT MONEY — สแกน remote ที่น่าจะเป็น collect
---=====================================================================
-local CollectRemotes = {}   -- {remote, ...}
-local function scanCollectRemotes()
-    CollectRemotes = {}
-    local keywords = {"collect","pickup","claim","money","cash","coin","drop","gem","reward","grab"}
-    local function scan(inst, depth)
-        if depth > 5 or not inst then return end
-        for _, child in ipairs(inst:GetChildren()) do
-            if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
-                local lower = child.Name:lower()
-                for _, kw in ipairs(keywords) do
-                    if lower:find(kw) then
-                        CollectRemotes[#CollectRemotes+1] = child
-                        break
-                    end
-                end
-            end
-            pcall(scan, child, depth + 1)
-        end
-    end
-    pcall(scan, RS, 0)
-    print("[AxionHub] CollectRemotes found:", #CollectRemotes)
-end
-scanCollectRemotes()
+local collectReady = CollectBalance ~= nil
 
 --=====================================================================
 -- STATE
 --=====================================================================
 local State = {
-    mode       = "AUTO",
-    running    = false,
-    rolls      = 0,
-    autoRollOn = false,
-    thread     = nil,
-    spamSpeed  = 0.03,
-    bypassAnim = true,
+    mode         = "AUTO",
+    running      = false,
+    rolls        = 0,
+    autoRollOn   = false,
+    thread       = nil,
+    spamSpeed    = 0.03,
+    bypassAnim   = true,
     killCutscene = true,
-    results    = {},
+    results      = {},
 
-    -- 🆕 Auto Collect
-    autoCollect   = false,   -- toggle
-    collectMode   = "TOUCH", -- "TOUCH" | "REMOTE" | "BOTH"
-    collectRadius = 80,      -- studs (สำหรับ TOUCH mode)
-    collected     = 0,
+    autoCollect   = false,
     collectThread = nil,
-    touchedCache  = {},      -- [part] = true (กัน touched ซ้ำ)
+    collectRate   = 0.5,
+    plotMin       = 1,
+    plotMax       = 16,
+    collected     = 0,
+    lastPlot      = 0,
+    collectStarted= false,   -- ★ flag ว่าถูกรันอยู่
 }
 
 --=====================================================================
--- 🎬 ANIMATION BYPASS (เหมือน v3)
+-- 🎬 ANIMATION BYPASS
 --=====================================================================
 local antiFX = { camModel=nil, cutscene=nil, rollingDir=nil, ccEffects={} }
 
@@ -288,117 +258,44 @@ if RollMessage then
 end
 
 --=====================================================================
--- 💰 AUTO COLLECT LOGIC
+-- 💰 AUTO COLLECT — AFK mode (background, เริ่มเองทันที)
 --=====================================================================
-local function getChar()
-    return LP.Character or LP.CharacterAdded:Wait()
-end
-
--- ชื่อ Part ที่อาจเป็นเงิน/ของ drop
-local COIN_KEYWORDS = {
-    "cash","money","coin","drop","orb","gem","reward","token","loot","pickup","dollar","$"
-}
-
-local function isCoinPart(obj)
-    if not obj or not obj:IsA("BasePart") then return false end
-    local n = obj.Name:lower()
-    for _, kw in ipairs(COIN_KEYWORDS) do
-        if n:find(kw) then return true end
-    end
-    -- เช็ค tag ด้วย
-    local ok, hasTag = pcall(function() return obj:HasTag("Collectable") or obj:HasTag("Money") end)
-    if ok and hasTag then return true end
-    return false
-end
-
--- โหมด TOUCH: ใช้ firetouchinterest หรือ CFrame ไปชน
-local firetouchinterest = rawget(getfenv(), "firetouchinterest") or firetouchinterest
-local fireproximityprompt = rawget(getfenv(), "fireproximityprompt") or fireproximityprompt
-
-local function touchCollect(part)
-    if State.touchedCache[part] then return end
-    State.touchedCache[part] = true
-    task.delay(2, function() State.touchedCache[part] = nil end)
-
-    local char = LP.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    -- 1) ลอง firetouchinterest (ยิง touched event ตรงๆ)
-    if firetouchinterest then
-        pcall(function()
-            firetouchinterest(hrp, part, 0)
-            task.wait()
-            firetouchinterest(hrp, part, 1)
-        end)
-    end
-
-    -- 2) ลอง fireproximityprompt ถ้ามี
-    if fireproximityprompt then
-        local pp = part:FindFirstChildOfClass("ProximityPrompt")
-        if pp then pcall(fireproximityprompt, pp) end
-        for _, d in ipairs(part:GetDescendants()) do
-            if d:IsA("ProximityPrompt") then
-                pcall(fireproximityprompt, d)
-            end
-        end
-    end
-
-    -- 3) fallback: teleport HRP ไปแตะแล้วกลับ
-    local oldCF = hrp.CFrame
+local function collectOnePlot(plotNum)
+    if not CollectBalance then return end
     pcall(function()
-        hrp.CFrame = part.CFrame + Vector3.new(0, 2, 0)
-        task.wait(0.02)
-        hrp.CFrame = oldCF
+        CollectBalance:FireServer(plotNum)
     end)
-
     State.collected = State.collected + 1
+    State.lastPlot = plotNum
 end
 
 local function collectLoop()
+    print("[AxionHub] 💰 AFK collect loop started")
     while State.autoCollect do
-        local char = LP.Character
-        if char then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-
-            -- โหมด TOUCH / BOTH
-            if (State.collectMode == "TOUCH" or State.collectMode == "BOTH") and hrp then
-                for _, obj in ipairs(Workspace:GetDescendants()) do
-                    if not State.autoCollect then break end
-                    if isCoinPart(obj) then
-                        local dist = (obj.Position - hrp.Position).Magnitude
-                        if dist <= State.collectRadius then
-                            touchCollect(obj)
-                        end
-                    end
-                end
-            end
-
-            -- โหมด REMOTE / BOTH
-            if State.collectMode == "REMOTE" or State.collectMode == "BOTH" then
-                for _, remote in ipairs(CollectRemotes) do
-                    if not State.autoCollect then break end
-                    if remote:IsA("RemoteEvent") then
-                        pcall(function() remote:FireServer() end)
-                    elseif remote:IsA("RemoteFunction") then
-                        pcall(function() remote:InvokeServer() end)
-                    end
-                end
-            end
+        for plotNum = State.plotMin, State.plotMax do
+            if not State.autoCollect then break end
+            collectOnePlot(plotNum)
+            task.wait(0.04)   -- กัน rate limit
         end
-        task.wait(0.35)   -- สแกนทุก 0.35 วิ (ไม่หนักเกิน)
+        task.wait(State.collectRate)
     end
+    print("[AxionHub] 💰 AFK collect loop stopped")
 end
 
 local function startCollect()
     if State.collectThread then return end
+    if not collectReady then
+        warn("[AxionHub] Cannot start collect — CollectBalance missing.")
+        return
+    end
     State.autoCollect = true
+    State.collectStarted = true
     State.collectThread = task.spawn(collectLoop)
 end
 
 local function stopCollect()
     State.autoCollect = false
+    State.collectStarted = false
     if State.collectThread then
         pcall(task.cancel, State.collectThread)
         State.collectThread = nil
@@ -406,7 +303,41 @@ local function stopCollect()
 end
 
 --=====================================================================
--- 🎨 UI BUILDER (Glass Morphism)
+-- ★ AUTO START COLLECT (AFK ตั้งแต่รันสคริปต์)
+--=====================================================================
+task.spawn(function()
+    -- รอ remote โหลด
+    local tries = 0
+    while not CollectBalance and tries < 30 do
+        task.wait(0.5)
+        tries = tries + 1
+        CollectBalance = safeFind(RS, "Network", "PlotService", "RE", "CollectBalance")
+    end
+    if CollectBalance then
+        print("[AxionHub] ✔ Auto-starting AFK collect (Plot 1-16)")
+        startCollect()
+        -- Auto start dice ด้วย
+        if remotesReady then
+            task.wait(0.3)
+            start()
+            print("[AxionHub] ✔ Auto-starting dice (AUTO mode)")
+        end
+    else
+        warn("[AxionHub] ✘ CollectBalance not found — AFK collect disabled")
+    end
+end)
+
+-- รีสตาร์ท collect อัตโนมัติถ้าหลุด (respawn, ย้ายเซิร์ฟ)
+LP.CharacterAdded:Connect(function()
+    task.wait(2)
+    if State.collectStarted and not State.autoCollect then
+        print("[AxionHub] 🔁 Respawning collect loop after character respawn")
+        startCollect()
+    end
+end)
+
+--=====================================================================
+-- 🎨 UI BUILDER (Gray → Black Glass)
 --=====================================================================
 local function buildUI()
     print("[AxionHub] buildUI() called")
@@ -415,7 +346,6 @@ local function buildUI()
     local old = parent:FindFirstChild("AxionHub_AutoDice")
     if old then old:Destroy() end
 
-    -- ---------- ScreenGui ----------
     local gui = Instance.new("ScreenGui")
     gui.Name = "AxionHub_AutoDice"
     gui.ResetOnSpawn = false
@@ -424,72 +354,65 @@ local function buildUI()
     gui.DisplayOrder = 999
     gui.Parent = parent
 
-    -- ---------- GLASS BLUR behind window ----------
     local blur = Instance.new("BlurEffect")
     blur.Name = "AxionGlassBlur"
-    blur.Size = 16
+    blur.Size = 14
     blur.Parent = Lighting
-
-    -- ลบ blur ตอน destroy
     gui.Destroying:Connect(function()
         pcall(function() blur:Destroy() end)
     end)
 
-    -- ---------- Main Window (Glass) ----------
+    -- ---------- Window ----------
     local win = Instance.new("Frame")
     win.Name = "Window"
-    win.Size = UDim2.new(0, 580, 0, 380)
-    win.Position = UDim2.new(0.5, -290, 0.5, -190)
+    win.Size = UDim2.new(0, 580, 0, 400)
+    win.Position = UDim2.new(0.5, -290, 0.5, -200)
     win.BackgroundColor3 = Theme.Glass
-    win.BackgroundTransparency = 0.35      -- ★ โปร่งแสง glass
+    win.BackgroundTransparency = 0.35
     win.BorderSizePixel = 0
     win.Active = true
     win.ClipsDescendants = true
     win.Parent = gui
     Instance.new("UICorner", win).CornerRadius = UDim.new(0, 16)
 
-    -- Deep purple → black gradient (เข้มกว่าเดิม)
+    -- ★ Gray → Black gradient (บนเทาเข้ม → ล่างดำ)
     local winGrad = Instance.new("UIGradient", win)
-    winGrad.Rotation = 115
+    winGrad.Rotation = 90
     winGrad.Transparency = NumberSequence.new{
         NumberSequenceKeypoint.new(0.0, 0.15),
-        NumberSequenceKeypoint.new(0.5, 0.45),
-        NumberSequenceKeypoint.new(1.0, 0.7),
+        NumberSequenceKeypoint.new(0.5, 0.4),
+        NumberSequenceKeypoint.new(1.0, 0.75),
     }
     winGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.00, Theme.Bg1),
+        ColorSequenceKeypoint.new(0.00, Theme.Bg1),  -- เทาเข้ม บน
         ColorSequenceKeypoint.new(0.45, Theme.Bg2),
-        ColorSequenceKeypoint.new(1.00, Theme.Bg3),
+        ColorSequenceKeypoint.new(1.00, Theme.Bg3),  -- ดำ ล่าง
     }
 
-    -- Glass edge glow
     local winStroke = Instance.new("UIStroke", win)
     winStroke.Thickness = 1.6
     winStroke.Transparency = 0.15
     local strokeGrad = Instance.new("UIGradient", winStroke)
     strokeGrad.Rotation = 45
     strokeGrad.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0.00, Theme.AccentLt),
-        ColorSequenceKeypoint.new(0.50, Theme.Accent),
-        ColorSequenceKeypoint.new(1.00, Color3.fromRGB(40, 10, 70)),
+        ColorSequenceKeypoint.new(0.00, Theme.BorderLt),
+        ColorSequenceKeypoint.new(0.50, Theme.Border),
+        ColorSequenceKeypoint.new(1.00, Color3.fromRGB(20, 20, 22)),
     }
 
-    -- Inner highlight (glass reflection)
     local innerHi = Instance.new("Frame", win)
-    innerHi.Name = "InnerHi"
     innerHi.Size = UDim2.new(1, -2, 0, 1)
     innerHi.Position = UDim2.new(0, 1, 0, 1)
-    innerHi.BackgroundColor3 = Color3.fromRGB(220, 180, 255)
-    innerHi.BackgroundTransparency = 0.55
+    innerHi.BackgroundColor3 = Color3.fromRGB(200, 200, 220)
+    innerHi.BackgroundTransparency = 0.6
     innerHi.BorderSizePixel = 0
     Instance.new("UICorner", innerHi).CornerRadius = UDim.new(1, 0)
 
-    -- ---------- SIDEBAR (Glass) ----------
+    -- ---------- SIDEBAR ----------
     local sidebar = Instance.new("Frame")
-    sidebar.Name = "Sidebar"
     sidebar.Size = UDim2.new(0, 155, 1, 0)
     sidebar.BackgroundColor3 = Theme.Sidebar
-    sidebar.BackgroundTransparency = 0.35   -- ★ glass
+    sidebar.BackgroundTransparency = 0.35
     sidebar.BorderSizePixel = 0
     sidebar.Parent = win
     Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 16)
@@ -498,14 +421,13 @@ local function buildUI()
     sbGrad.Rotation = 90
     sbGrad.Transparency = NumberSequence.new{
         NumberSequenceKeypoint.new(0, 0.2),
-        NumberSequenceKeypoint.new(1, 0.6),
+        NumberSequenceKeypoint.new(1, 0.65),
     }
     sbGrad.Color = ColorSequence.new(
-        Color3.fromRGB(32, 12, 58),
-        Color3.fromRGB(4, 2, 10)
+        Color3.fromRGB(45, 45, 52),    -- เทาเข้ม บน
+        Color3.fromRGB(5, 5, 7)        -- ดำ ล่าง
     )
 
-    -- Divider
     local sbLine = Instance.new("Frame")
     sbLine.Size = UDim2.new(0, 1, 1, 0)
     sbLine.Position = UDim2.new(1, -1, 0, 0)
@@ -514,7 +436,6 @@ local function buildUI()
     sbLine.BorderSizePixel = 0
     sbLine.Parent = sidebar
 
-    -- Logo
     local logoBox = Instance.new("Frame")
     logoBox.Size = UDim2.new(0, 44, 0, 44)
     logoBox.Position = UDim2.new(0, 18, 0, 18)
@@ -552,7 +473,7 @@ local function buildUI()
     title.Parent = sidebar
 
     local sub = Instance.new("TextLabel")
-    sub.Text = "AutoDice  v4"
+    sub.Text = "AutoDice  v6"
     sub.Font = Enum.Font.Gotham
     sub.TextSize = 10
     sub.TextColor3 = Theme.Muted
@@ -570,7 +491,6 @@ local function buildUI()
     divider.BorderSizePixel = 0
     divider.Parent = sidebar
 
-    -- Mode buttons
     local modes = {"AUTO", "SPAM", "BOTH"}
     local modeIcons = { "⟳", "⚡", "◈" }
     local modeDesc = {
@@ -671,18 +591,15 @@ local function buildUI()
         end)
     end
 
-    local function applyActiveMode()
-        for mm, data in pairs(sidebarBtns) do
-            local on = (mm == State.mode)
-            data.glow.Visible = on
-            data.stroke.Transparency = on and 0.15 or 0.7
-            data.stroke.Color = on and Theme.AccentLt or Theme.Border
-            data.name.TextColor3 = on and Theme.Text or Theme.TextDim
-            data.icon.TextColor3 = on and Theme.Text or Theme.AccentLt
-            data.btn.BackgroundTransparency = on and 0.1 or 0.85
-        end
+    for mm, data in pairs(sidebarBtns) do
+        local on = (mm == State.mode)
+        data.glow.Visible = on
+        data.stroke.Transparency = on and 0.15 or 0.7
+        data.stroke.Color = on and Theme.AccentLt or Theme.Border
+        data.name.TextColor3 = on and Theme.Text or Theme.TextDim
+        data.icon.TextColor3 = on and Theme.Text or Theme.AccentLt
+        data.btn.BackgroundTransparency = on and 0.1 or 0.85
     end
-    applyActiveMode()
 
     -- ---------- CONTENT ----------
     local content = Instance.new("Frame")
@@ -691,12 +608,11 @@ local function buildUI()
     content.BackgroundTransparency = 1
     content.Parent = win
 
-    -- Header
     local header = Instance.new("Frame")
     header.Size = UDim2.new(1, -36, 0, 46)
     header.Position = UDim2.new(0, 18, 0, 16)
     header.BackgroundColor3 = Theme.Card
-    header.BackgroundTransparency = 0.45   -- glass
+    header.BackgroundTransparency = 0.45
     header.BorderSizePixel = 0
     header.Parent = content
     Instance.new("UICorner", header).CornerRadius = UDim.new(0, 10)
@@ -728,14 +644,14 @@ local function buildUI()
             local ready = remotesReady
             local stat = ready and (State.running and "RUNNING" or "READY") or "NO REMOTES"
             local color = ready and (State.running and Theme.Good or Theme.AccentLt) or Theme.Bad
-            statusTxt.Text = string.format("%s  ·  %s  ·  rolls: %d  ·  💰 %d",
-                stat, State.mode, State.rolls, State.collected)
+            statusTxt.Text = string.format("💤 AFK  ·  %s  ·  rolls: %d  ·  💰 %d",
+                stat, State.rolls, State.collected)
             dot.BackgroundColor3 = color
             task.wait(0.2)
         end
     end)
 
-    -- Speed slider card
+    -- Speed slider
     local speedCard = Instance.new("Frame")
     speedCard.Size = UDim2.new(1, -36, 0, 62)
     speedCard.Position = UDim2.new(0, 18, 0, 76)
@@ -827,9 +743,9 @@ local function buildUI()
         end
     end)
 
-    -- ---------- TOGGLES CARD ----------
+    -- Toggles
     local togCard = Instance.new("Frame")
-    togCard.Size = UDim2.new(1, -36, 0, 130)   -- ★ สูงขึ้น (มี collect toggle)
+    togCard.Size = UDim2.new(1, -36, 0, 138)
     togCard.Position = UDim2.new(0, 18, 0, 148)
     togCard.BackgroundColor3 = Theme.Card
     togCard.BackgroundTransparency = 0.45
@@ -842,14 +758,12 @@ local function buildUI()
     tcStroke.Transparency = 0.6
     tcStroke.Color = Theme.Border
 
-    -- iOS toggle builder
     local function makeToggle(parent, y, label, defaultOn, cb, tintColor)
         tintColor = tintColor or Theme.Accent
 
         local lbl = Instance.new("TextLabel", parent)
         lbl.Text = label
-        lbl.Font = Enum.Font.GothamMedium
-        lbl.TextSize = 11
+        lbl.Font = Enum.Font.GothamMedium        lbl.TextSize = 11
         lbl.TextColor3 = Theme.Text
         lbl.BackgroundTransparency = 1
         lbl.Size = UDim2.new(0.75, 0, 0, 20)
@@ -898,57 +812,72 @@ local function buildUI()
         State.killCutscene,
         function(v) State.killCutscene = v end)
 
-    -- ★ AUTO COLLECT MONEY toggle (สีทอง)
-    makeToggle(togCard, 60, "💰 Auto Collect Money",
+    makeToggle(togCard, 60, "💰 AFK Collect Money (Plot 1–16)",
         State.autoCollect,
         function(v)
             if v then startCollect() else stopCollect() end
         end,
-        Color3.fromRGB(255, 200, 80))   -- gold
+        Theme.Gold)
 
-    -- Collect mode label
-    local cModeLbl = Instance.new("TextLabel", togCard)
-    cModeLbl.Text = "mode: TOUCH  ·  radius: 80"
-    cModeLbl.Font = Enum.Font.Gotham
-    cModeLbl.TextSize = 9
-    cModeLbl.TextColor3 = Theme.Muted
-    cModeLbl.BackgroundTransparency = 1
-    cModeLbl.Size = UDim2.new(0.75, 0, 0, 14)
-    cModeLbl.Position = UDim2.new(0, 14, 0, 88)
-    cModeLbl.TextXAlignment = Enum.TextXAlignment.Left
+    local cInfo = Instance.new("TextLabel", togCard)
+    cInfo.Text = string.format("AFK mode  ·  every %.1fs  ·  plot %d→%d",
+        State.collectRate, State.plotMin, State.plotMax)
+    cInfo.Font = Enum.Font.Gotham
+    cInfo.TextSize = 9
+    cInfo.TextColor3 = Theme.Muted
+    cInfo.BackgroundTransparency = 1
+    cInfo.Size = UDim2.new(1, -28, 0, 14)
+    cInfo.Position = UDim2.new(0, 14, 0, 88)
+    cInfo.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- ปุ่มสลับโหมด collect (เล็กๆ)
-    local cycleBtn = Instance.new("TextButton", togCard)
-    cycleBtn.Size = UDim2.new(0, 70, 0, 18)
-    cycleBtn.Position = UDim2.new(1, -84, 0, 86)
-    cycleBtn.BackgroundColor3 = Theme.CardHi
-    cycleBtn.BackgroundTransparency = 0.3
-    cycleBtn.Text = "TOUCH"
-    cycleBtn.Font = Enum.Font.GothamBold
-    cycleBtn.TextSize = 9.5
-    cycleBtn.TextColor3 = Theme.AccentLt
-    cycleBtn.AutoButtonColor = false
-    Instance.new("UICorner", cycleBtn).CornerRadius = UDim.new(1, 0)
+    local function smallBtn(txt, xOff, onClick)
+        local b = Instance.new("TextButton", togCard)
+        b.Size = UDim2.new(0, 42, 0, 18)
+        b.Position = UDim2.new(1, xOff, 0, 110)
+        b.BackgroundColor3 = Theme.CardHi
+        b.BackgroundTransparency = 0.3
+        b.Text = txt
+        b.Font = Enum.Font.GothamBold
+        b.TextSize = 9.5
+        b.TextColor3 = Theme.AccentLt
+        b.AutoButtonColor = false
+        Instance.new("UICorner", b).CornerRadius = UDim.new(1, 0)
+        b.MouseButton1Click:Connect(onClick)
+        return b
+    end
 
-    local modeOrder = { "TOUCH", "REMOTE", "BOTH" }
-    cycleBtn.MouseButton1Click:Connect(function()
-        local idx = 1
-        for i, m in ipairs(modeOrder) do
-            if m == State.collectMode then idx = i break end
-        end
-        idx = (idx % #modeOrder) + 1
-        State.collectMode = modeOrder[idx]
-        cycleBtn.Text = State.collectMode
-        cModeLbl.Text = string.format("mode: %s  ·  radius: %d",
-            State.collectMode, State.collectRadius)
+    smallBtn("4", -192, function()
+        State.plotMin, State.plotMax = 1, 4
+        cInfo.Text = string.format("AFK mode  ·  every %.1fs  ·  plot %d→%d",
+            State.collectRate, State.plotMin, State.plotMax)
+    end)
+    smallBtn("8", -146, function()
+        State.plotMin, State.plotMax = 1, 8
+        cInfo.Text = string.format("AFK mode  ·  every %.1fs  ·  plot %d→%d",
+            State.collectRate, State.plotMin, State.plotMax)
+    end)
+    smallBtn("16", -100, function()
+        State.plotMin, State.plotMax = 1, 16
+        cInfo.Text = string.format("AFK mode  ·  every %.1fs  ·  plot %d→%d",
+            State.collectRate, State.plotMin, State.plotMax)
     end)
 
-    -- ---------- Status Info ----------
+    local rangeLbl = Instance.new("TextLabel", togCard)
+    rangeLbl.Text = "PLOT RANGE"
+    rangeLbl.Font = Enum.Font.GothamBold
+    rangeLbl.TextSize = 9
+    rangeLbl.TextColor3 = Theme.Muted
+    rangeLbl.BackgroundTransparency = 1
+    rangeLbl.Size = UDim2.new(0, 80, 0, 14)
+    rangeLbl.Position = UDim2.new(0, 14, 0, 112)
+    rangeLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- Info box
     local info = Instance.new("Frame")
     info.Size = UDim2.new(1, -36, 0, 44)
-    info.Position = UDim2.new(0, 18, 0, 288)
-    info.BackgroundColor3 = Color3.fromRGB(16, 8, 30)
-    info.BackgroundTransparency = 0.45
+    info.Position = UDim2.new(0, 18, 0, 296)
+    info.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+    info.BackgroundTransparency = 0.4
     info.BorderSizePixel = 0
     info.Parent = content
     Instance.new("UICorner", info).CornerRadius = UDim.new(0, 10)
@@ -956,17 +885,17 @@ local function buildUI()
     local iStroke = Instance.new("UIStroke", info)
     iStroke.Thickness = 1
     iStroke.Transparency = 0.6
-    iStroke.Color = remotesReady and Theme.Accent2 or Theme.Bad
+    iStroke.Color = collectReady and Theme.Gold or Theme.Bad
 
     local infoTxt = Instance.new("TextLabel", info)
     infoTxt.Text = string.format(
-        "✔  remotes: %d collect  ·  %s\nRollDice()  ·  SetAutoRoll(bool)",
-        #CollectRemotes,
-        remotesReady and "RollService ready" or "no roll remote"
+        "%s AFK COLLECT  ·  %s RollService\nPlotService.RE.CollectBalance(plotNumber)",
+        collectReady and "✔" or "✘",
+        remotesReady and "✔" or "✘"
     )
     infoTxt.Font = Enum.Font.Gotham
     infoTxt.TextSize = 10
-    infoTxt.TextColor3 = remotesReady and Theme.TextDim or Theme.Bad
+    infoTxt.TextColor3 = collectReady and Theme.TextDim or Theme.Bad
     infoTxt.BackgroundTransparency = 1
     infoTxt.Size = UDim2.new(1, -20, 1, 0)
     infoTxt.Position = UDim2.new(0, 12, 0, 0)
@@ -974,12 +903,12 @@ local function buildUI()
     infoTxt.TextYAlignment = Enum.TextYAlignment.Center
     infoTxt.TextWrapped = true
 
-    -- ---------- START / STOP ----------
+    -- Buttons
     local startBtn = Instance.new("TextButton")
     startBtn.Size = UDim2.new(0.5, -26, 0, 42)
     startBtn.Position = UDim2.new(0, 18, 1, -58)
     startBtn.BorderSizePixel = 0
-    startBtn.Text = "▶  START"
+    startBtn.Text = "▶  START DICE"
     startBtn.Font = Enum.Font.GothamBold
     startBtn.TextSize = 13
     startBtn.TextColor3 = Theme.Text
@@ -999,7 +928,7 @@ local function buildUI()
     local stopBtn = Instance.new("TextButton")
     stopBtn.Size = UDim2.new(0.5, -26, 0, 42)
     stopBtn.Position = UDim2.new(0.5, 8, 1, -58)
-    stopBtn.BackgroundColor3 = Color3.fromRGB(45, 15, 30)
+    stopBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
     stopBtn.BackgroundTransparency = 0.2
     stopBtn.BorderSizePixel = 0
     stopBtn.Text = "■  STOP"
@@ -1011,7 +940,7 @@ local function buildUI()
     Instance.new("UICorner", stopBtn).CornerRadius = UDim.new(0, 10)
 
     local sbSt2 = Instance.new("UIStroke", stopBtn)
-    sbSt2.Color = Color3.fromRGB(180, 60, 90)
+    sbSt2.Color = Theme.Border
     sbSt2.Thickness = 1
     sbSt2.Transparency = 0.5
 
@@ -1023,13 +952,12 @@ local function buildUI()
     end)
     stopBtn.MouseButton1Click:Connect(function()
         stop()
-        startBtn.Text = "▶  START"
+        startBtn.Text = "▶  START DICE"
         startBtn.TextColor3 = Theme.Text
     end)
 
-    -- ---------- Footer ----------
     local footer = Instance.new("TextLabel", win)
-    footer.Text = "v4  ·  glass  ·  auto-collect  ·  heartbeat-driven"
+    footer.Text = "v6  ·  AFK collect  ·  gray→black  ·  heartbeat"
     footer.Font = Enum.Font.Gotham
     footer.TextSize = 9
     footer.TextColor3 = Theme.Muted
@@ -1039,7 +967,7 @@ local function buildUI()
     footer.TextXAlignment = Enum.TextXAlignment.Right
     footer.Parent = win
 
-    -- ---------- Drag ----------
+    -- Drag
     local draggingWin = false
     local dragStart, startPos
     header.InputBegan:Connect(function(inp)
@@ -1071,11 +999,11 @@ local function buildUI()
 end
 
 --=====================================================================
--- 🚀 BUILD UI
+-- 🚀 BUILD
 --=====================================================================
 local ok, err = pcall(buildUI)
 if not ok then
     warn("[AxionHub] buildUI ERROR:", err)
 end
 
-print("[AxionHub] v4 ready.")
+print("[AxionHub] v6 ready — AFK collect auto-started")
