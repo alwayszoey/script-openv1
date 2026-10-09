@@ -172,6 +172,64 @@ local function createGradient(parent, rotation, colorSequence)
 	return gradient
 end
 
+-- Register extra icons into the resolver, e.g.:
+--   AxionLib.RegisterIcons({ myIcon = "rbxassetid://123", gear = 456 })
+-- Names are matched case-insensitively wherever a component takes an icon.
+function AxionLib.RegisterIcons(icons)
+	for name, value in pairs(icons) do
+		BUILTIN_ICONS[tostring(name):lower()] = value
+	end
+end
+
+-- Load an icon pack from a URL: a Lua source file that returns a table of
+-- { name = rbxassetid_or_image, ... }, e.g. a self-hosted dist/Icons.lua.
+-- Optionally caches it to `cacheFile` so later loads don't need the network.
+-- Returns true on success (and registers the icons), false otherwise.
+function AxionLib.LoadIconPack(url, cacheFile)
+	local function parse(source)
+		local chunk = loadstring(source)
+		if not chunk then
+			return false
+		end
+
+		local ok, data = pcall(chunk)
+		if ok and type(data) == "table" then
+			AxionLib.RegisterIcons(data)
+			return true
+		end
+
+		return false
+	end
+
+	if cacheFile and isfile and readfile and isfile(cacheFile) then
+		local ok, source = pcall(readfile, cacheFile)
+		if ok and parse(source) then
+			return true
+		end
+	end
+
+	local ok, response = pcall(request, { Url = url, Method = "GET" })
+	if not ok or not response or not response.Success then
+		return false
+	end
+
+	if not parse(response.Body) then
+		return false
+	end
+
+	if cacheFile and writefile then
+		pcall(function()
+			local folder = cacheFile:match("^(.*)/[^/]+$")
+			if folder and makefolder and isfolder and not isfolder(folder) then
+				makefolder(folder)
+			end
+			writefile(cacheFile, response.Body)
+		end)
+	end
+
+	return true
+end
+
 --// AxionLib.new ---------------------------------------------------------
 
 -- options:
