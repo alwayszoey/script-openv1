@@ -1,9 +1,8 @@
--- ============================================================
--- UNIVERSAL HUB - v1.0.0
--- Getkey UI + MacLib + Full Features
+--// ============================================================
+-- UNIVERSAL HUB - v1.0.1
+-- Getkey UI + AxionLib + Full Features
 -- ============================================================
 
---// Services
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -16,18 +15,16 @@ local HttpService      = game:GetService("HttpService")
 local RbxAnalytics     = game:GetService("RbxAnalyticsService")
 local LocalPlayer      = Players.LocalPlayer
 
---// Config
 local Config = {
     Title = "UNIVERSAL HUB",
-    Subtitle = "v1.0.0 • Verified Access",
-    Version = "v1.0.0",
+    Subtitle = "v1.0.1 • Verified Access",
+    Version = "v1.0.1",
     ApiUrl = "https://getkeyxcl.vercel.app",
     StorageKey = "universalhub_key_v1",
-    MacLibUrl = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/maclib.lua",
+    AxionLibUrl = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/AxionUi/AxionLib.lua",
     GetkeyUiUrl = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/getkey-ui.lua"
 }
 
---// State
 local State = {
     BypassEnabled=false, BypassRange=500, RemoveCollision=false, AutoEnterLocked=false,
     SpeedEnabled=false, SpeedValue=16, MaxSpeed=250,
@@ -39,7 +36,6 @@ local State = {
 
 local AntiBan = { tickCounter = 0, currentRampSpeed = 16 }
 
---// Cleanup old GUIs
 for _, name in ipairs({"UniversalHub", "UniversalHubLoading", "GetkeyUI", "UniversalHubToggle", "UniversalHubHUD"}) do
     pcall(function()
         local o = CoreGui:FindFirstChild(name)
@@ -51,7 +47,6 @@ for _, name in ipairs({"UniversalHub", "UniversalHubLoading", "GetkeyUI", "Unive
     end)
 end
 
---// HWID
 local function getHWID()
     local ok, id = pcall(function()
         return RbxAnalytics:GetClientId()
@@ -62,7 +57,6 @@ end
 
 local HWID = getHWID()
 
---// Verify API
 local function verifyKey(key)
     local payload = HttpService:JSONEncode({ key = key, hwid = HWID })
 
@@ -92,7 +86,6 @@ local function verifyKey(key)
     return false, decoded.reason or "invalid"
 end
 
---// Loading Screen
 local function showLoadingScreen()
     local LoadingGui = Instance.new("ScreenGui")
     LoadingGui.Name = "UniversalHubLoading"
@@ -157,11 +150,35 @@ local function showLoadingScreen()
     LoadingGui:Destroy()
 end
 
---// MacLib Hub
-local function buildMainUI()
-    local MacLib = loadstring(game:HttpGet(Config.MacLibUrl))()
+--// Load AxionLib and adapt its handles to the call sites used below.
+local function loadAxionLib()
+    local source
+    local ok, result = pcall(function()
+        return game:HttpGet(Config.AxionLibUrl)
+    end)
+    if not ok or type(result) ~= "string" or #result < 32 then
+        error("AxionLib fetch failed: " .. tostring(result))
+    end
+    source = result
 
-    local Window = MacLib:Window({
+    local chunk, compileErr = loadstring(source)
+    if not chunk then
+        error("AxionLib compile failed: " .. tostring(compileErr))
+    end
+
+    local ran, lib = pcall(chunk)
+    if not ran or type(lib) ~= "table" then
+        error("AxionLib did not return a table: " .. tostring(lib))
+    end
+
+    return lib
+end
+
+--// AxionLib Hub
+local function buildMainUI()
+    local AxionLib = loadAxionLib()
+
+    local Window = AxionLib:Window({
         Title = Config.Title,
         Subtitle = Config.Subtitle,
         Size = UDim2.fromOffset(620, 420),
@@ -171,9 +188,8 @@ local function buildMainUI()
         AcrylicBlur = false
     })
 
-    MacLib:SetFolder("UniversalHub")
+    AxionLib:SetFolder("UniversalHub")
 
-    -- Global settings
     Window:GlobalSetting({
         Name = "UI Blur",
         Default = false,
@@ -206,7 +222,6 @@ local function buildMainUI()
         end
     })
 
-    -- Tab group
     local tabGroup = Window:TabGroup()
 
     local tabs = {
@@ -217,7 +232,6 @@ local function buildMainUI()
         Settings = tabGroup:Tab({ Name = "Settings", Image = "rbxassetid://108952102602834" }),
     }
 
-    --// Bypass functions
     local bypassedGates = {}
     local bypassedCollisions = {}
 
@@ -352,7 +366,6 @@ local function buildMainUI()
         cleanupSpeedInstances()
     end
 
-    --// TAB: BYPASS
     local bypassSection = tabs.Bypass:Section({ Side = "Left" })
     bypassSection:Header({ Text = "Bypass Gate System" })
 
@@ -430,7 +443,6 @@ local function buildMainUI()
         end
     })
 
-    --// TAB: MOVEMENT
     local movementSection = tabs.Movement:Section({ Side = "Left" })
     movementSection:Header({ Text = "Speed" })
 
@@ -479,7 +491,6 @@ local function buildMainUI()
     movementSection:Toggle({ Name = "Anti-Void", Default = false, Callback = function(v) State.AntiVoidEnabled = v end })
     movementSection:Toggle({ Name = "Anti-AFK", Default = false, Callback = function(v) State.AntiAfkEnabled = v end })
 
-    --// TAB: SAVE/TP
     local stpSection = tabs.SaveTP:Section({ Side = "Left" })
     stpSection:Header({ Text = "Save Position" })
 
@@ -561,7 +572,6 @@ local function buildMainUI()
         end
     })
 
-    --// TAB: ANTI-BAN
     local abSection = tabs.AntiBan:Section({ Side = "Left" })
     abSection:Header({ Text = "Anti-Ban Core" })
 
@@ -593,7 +603,6 @@ local function buildMainUI()
         Callback = function() resetCharacterPhysics() end
     })
 
-    --// TAB: SETTINGS
     local setSection = tabs.Settings:Section({ Side = "Left" })
     setSection:Header({ Text = "Display" })
 
@@ -623,11 +632,10 @@ local function buildMainUI()
     setSection:Header({ Text = "About" })
 
     setSection:Label({ Text = Config.Title .. " " .. Config.Version })
-    setSection:SubLabel({ Text = "Powered by MacLib UI" })
+    setSection:SubLabel({ Text = "Powered by AxionLib UI" })
 
     tabs.Bypass:Select()
 
-    --// CORE LOOPS
     RunService.RenderStepped:Connect(function()
         local char = LocalPlayer.Character
         if not char then return end
@@ -735,7 +743,6 @@ local function buildMainUI()
         end
     end)
 
-    --// Fly
     local flyConn, flyCleanup
     local function startFly()
         local char = LocalPlayer.Character
@@ -820,7 +827,6 @@ local function buildMainUI()
         if State.BypassEnabled then pcall(bypassAllGates); pcall(bypassAllPrompts) end
     end)
 
-    --// COORDINATE HUD
     local CoordGui = Instance.new("ScreenGui")
     CoordGui.Name = "UniversalHubHUD"
     CoordGui.ResetOnSpawn = false
@@ -901,7 +907,6 @@ local function buildMainUI()
         end)
     end)
 
-    --// Notification
     Window:Notify({
         Title = Config.Title,
         Description = "Loaded! Press Right Ctrl to toggle the menu.",
@@ -912,7 +917,6 @@ local function buildMainUI()
     print("[" .. Config.Title .. "] Right Ctrl = toggle UI")
 end
 
---// Entry Point
 local function tryStoredKey()
     if not (readfile and isfile) then return nil end
     local ok, content = pcall(function()
@@ -927,7 +931,6 @@ end
 local function startFlow()
     showLoadingScreen()
 
-    -- 1) ลองคีย์ที่บันทึกไว้ก่อน
     local stored = tryStoredKey()
     if stored then
         local valid = verifyKey(stored)
@@ -937,11 +940,9 @@ local function startFlow()
         end
     end
 
-    -- 2) เปิดหน้า Getkey UI
     local GetkeyUI = loadstring(game:HttpGet(Config.GetkeyUiUrl))()
 
     GetkeyUI.Show(function()
-        -- onSuccess: เปิด Hub
         buildMainUI()
     end)
 end
