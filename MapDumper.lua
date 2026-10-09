@@ -1,7 +1,7 @@
 --!nolint
 --!nocheck
 
--- Xexer Dump: Complete Edition (Localized & Remote Spy)
+-- AxionHub Dump: Complete Edition (Localized & Remote Spy)
 
 local __ok, __err = pcall(function()
 local Players = game:GetService("Players")
@@ -14,7 +14,7 @@ pcall(function()
     pcall(function() if gethui then table.insert(roots, gethui()) end end)
     for _, root in ipairs(roots) do
         for _, item in ipairs(root:GetChildren()) do
-            if item.Name == "AxionHub_XexerDump" or item.Name == "XexerDump_OpenButton" then
+            if item.Name == "AxionHub_DumpToolkit" or item.Name == "AxionHub_Dump_OpenButton" then
                 pcall(function() item:Destroy() end)
             end
         end
@@ -27,19 +27,19 @@ end)
 -- downloading a third-party UI library at runtime.
 local AxionUI = {}
 local AxionPalette = {
-    bgTop = Color3.fromRGB(19, 21, 35),
-    bgBottom = Color3.fromRGB(10, 11, 19),
-    panelTop = Color3.fromRGB(29, 31, 49),
-    panelBottom = Color3.fromRGB(20, 22, 36),
-    sidebarTop = Color3.fromRGB(17, 19, 32),
-    sidebarBottom = Color3.fromRGB(11, 12, 22),
+    bgTop = Color3.fromRGB(26, 12, 48),
+    bgBottom = Color3.fromRGB(4, 2, 9),
+    panelTop = Color3.fromRGB(44, 20, 82),
+    panelBottom = Color3.fromRGB(14, 6, 28),
+    sidebarTop = Color3.fromRGB(14, 6, 26),
+    sidebarBottom = Color3.fromRGB(2, 1, 5),
     text = Color3.fromRGB(245, 246, 255),
     muted = Color3.fromRGB(153, 158, 184),
-    accentBlue = Color3.fromRGB(93, 117, 255),
-    accentPink = Color3.fromRGB(222, 92, 210),
+    accentBlue = Color3.fromRGB(84, 38, 232),
+    accentPink = Color3.fromRGB(172, 44, 248),
     success = Color3.fromRGB(94, 224, 164),
     danger = Color3.fromRGB(255, 103, 126),
-    track = Color3.fromRGB(48, 51, 73),
+    track = Color3.fromRGB(26, 14, 44),
 }
 local AxionGui, AxionWindow, AxionContent, AxionSidebar, AxionTabButtons
 local AxionTabs = {}
@@ -131,7 +131,7 @@ end
 
 local function axionNotify(title, content, icon, duration)
     if not AxionGui or not AxionGui.Parent then
-        warn(("[Xexer Dump] %s: %s"):format(tostring(title), tostring(content)))
+        warn(("[AxionHub Dump] %s: %s"):format(tostring(title), tostring(content)))
         return
     end
     AxionToastToken += 1
@@ -161,7 +161,7 @@ local function axionNotify(title, content, icon, duration)
     axionCorner(stripe, 99)
     axionGradient(stripe, 90)
 
-    axionLabel(toast, title or "Xexer Dump", UDim2.new(1, -30, 0, 22), UDim2.new(0, 20, 0, 7), 12, AxionPalette.text, Enum.Font.GothamBold)
+    axionLabel(toast, title or "AxionHub Dump", UDim2.new(1, -30, 0, 22), UDim2.new(0, 20, 0, 7), 12, AxionPalette.text, Enum.Font.GothamBold)
     local desc = axionLabel(toast, content or "", UDim2.new(1, -30, 0, 30), UDim2.new(0, 20, 0, 29), 10, AxionPalette.muted)
     desc.TextYAlignment = Enum.TextYAlignment.Top
 
@@ -176,7 +176,7 @@ end
 
 function AxionUI:Notify(options)
     options = options or {}
-    axionNotify(options.Title or "Xexer Dump", options.Content or "", options.Icon, options.Duration)
+    axionNotify(options.Title or "AxionHub Dump", options.Content or "", options.Icon, options.Duration)
 end
 
 function AxionUI:CreateWindow(options)
@@ -184,7 +184,7 @@ function AxionUI:CreateWindow(options)
     local playerGui = axionParent()
 
     AxionGui = Instance.new("ScreenGui")
-    AxionGui.Name = "AxionHub_XexerDump"
+    AxionGui.Name = "AxionHub_DumpToolkit"
     AxionGui.ResetOnSpawn = false
     AxionGui.IgnoreGuiInset = true
     AxionGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -193,7 +193,7 @@ function AxionUI:CreateWindow(options)
 
     AxionWindow = Instance.new("Frame")
     AxionWindow.Name = "MainWindow"
-    AxionWindow.Size = options.Size or UDim2.fromOffset(660, 500)
+    AxionWindow.Size = options.Size or UDim2.fromOffset(900, 540)
     AxionWindow.AnchorPoint = Vector2.new(0.5, 0.5)
     AxionWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
     AxionWindow.BackgroundColor3 = AxionPalette.bgBottom
@@ -211,7 +211,7 @@ function AxionUI:CreateWindow(options)
     local function updateScale()
         local camera = workspace.CurrentCamera
         local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-        scale.Scale = math.clamp(math.min((viewport.X * 0.94) / 660, (viewport.Y * 0.9) / 500, 1), 0.48, 1)
+        scale.Scale = math.clamp(math.min((viewport.X * 0.94) / 900, (viewport.Y * 0.9) / 540, 1), 0.48, 1)
     end
     updateScale()
     if workspace.CurrentCamera then
@@ -246,7 +246,7 @@ function AxionUI:CreateWindow(options)
     logo.ZIndex = 6
     logo.Parent = topbar
 
-    axionLabel(topbar, options.Title or "Xexer Dump", UDim2.new(0, 250, 0, 20), UDim2.new(0, 54, 0, 8), 14, AxionPalette.text, Enum.Font.GothamBold)
+    axionLabel(topbar, options.Title or "AxionHub Dump", UDim2.new(0, 250, 0, 20), UDim2.new(0, 54, 0, 8), 14, AxionPalette.text, Enum.Font.GothamBold)
     axionLabel(topbar, options.Author or "AxionHub UI", UDim2.new(0, 250, 0, 16), UDim2.new(0, 54, 0, 28), 10, AxionPalette.muted, Enum.Font.Gotham)
 
     local minimize = Instance.new("TextButton")
@@ -265,7 +265,7 @@ function AxionUI:CreateWindow(options)
 
     AxionSidebar = Instance.new("Frame")
     AxionSidebar.Name = "Sidebar"
-    AxionSidebar.Size = UDim2.new(0, 166, 1, -54)
+    AxionSidebar.Size = UDim2.new(0, 220, 1, -54)
     AxionSidebar.Position = UDim2.new(0, 0, 0, 54)
     AxionSidebar.BackgroundColor3 = AxionPalette.sidebarBottom
     AxionSidebar.BorderSizePixel = 0
@@ -273,13 +273,13 @@ function AxionUI:CreateWindow(options)
     AxionSidebar.Parent = AxionWindow
     axionGradient(AxionSidebar, 90, AxionPalette.sidebarTop, AxionPalette.sidebarBottom)
 
-    axionLabel(AxionSidebar, "AXIONHUB", UDim2.new(1, -24, 0, 18), UDim2.new(0, 14, 0, 14), 10, AxionPalette.accentPink, Enum.Font.GothamBold)
-    axionLabel(AxionSidebar, "DUMP TOOLKIT", UDim2.new(1, -24, 0, 16), UDim2.new(0, 14, 0, 33), 9, AxionPalette.muted, Enum.Font.Gotham)
+    axionLabel(AxionSidebar, "AxionHub", UDim2.new(1, -24, 0, 22), UDim2.new(0, 14, 0, 42), 13, AxionPalette.text, Enum.Font.GothamBold)
+    axionLabel(AxionSidebar, "Dump Toolkit", UDim2.new(1, -24, 0, 18), UDim2.new(0, 14, 0, 62), 10, AxionPalette.muted, Enum.Font.Gotham)
 
     AxionContent = Instance.new("Frame")
     AxionContent.Name = "Content"
-    AxionContent.Size = UDim2.new(1, -166, 1, -54)
-    AxionContent.Position = UDim2.new(0, 166, 0, 54)
+    AxionContent.Size = UDim2.new(1, -220, 1, -54)
+    AxionContent.Position = UDim2.new(0, 220, 0, 54)
     AxionContent.BackgroundTransparency = 1
     AxionContent.BorderSizePixel = 0
     AxionContent.ZIndex = 3
@@ -306,13 +306,13 @@ function AxionUI:CreateWindow(options)
         openOptions = openOptions or {}
         if AxionOpenButton then pcall(function() AxionOpenButton:Destroy() end) end
         AxionOpenButton = Instance.new("TextButton")
-        AxionOpenButton.Name = "XexerDump_OpenButton"
-        AxionOpenButton.Size = UDim2.fromOffset(48, 48)
+        AxionOpenButton.Name = "AxionHub_Dump_OpenButton"
+        AxionOpenButton.Size = UDim2.fromOffset(54, 54)
         AxionOpenButton.Position = UDim2.new(0, 20, 0.35, 0)
         AxionOpenButton.BackgroundColor3 = AxionPalette.panelTop
-        AxionOpenButton.Text = "X"
+        AxionOpenButton.Text = "AX"
         AxionOpenButton.TextColor3 = AxionPalette.text
-        AxionOpenButton.TextSize = 15
+        AxionOpenButton.TextSize = 13
         AxionOpenButton.Font = Enum.Font.GothamBold
         AxionOpenButton.AutoButtonColor = true
         AxionOpenButton.Active = true
@@ -338,13 +338,13 @@ function AxionUI:CreateWindow(options)
         local index = #AxionTabs + 1
         local button = Instance.new("TextButton")
         button.Name = "Tab_" .. tostring(index)
-        button.Size = UDim2.new(1, -16, 0, 38)
-        button.Position = UDim2.new(0, 8, 0, 62 + (index - 1) * 44)
+        button.Size = UDim2.new(1, -20, 0, 48)
+        button.Position = UDim2.new(0, 10, 0, 96 + (index - 1) * 58)
         button.BackgroundColor3 = AxionPalette.panelTop
         button.BackgroundTransparency = 1
         button.BorderSizePixel = 0
         button.Text = "   " .. tostring(tab.title)
-        button.TextSize = 11
+        button.TextSize = 12
         button.TextColor3 = AxionPalette.muted
         button.TextXAlignment = Enum.TextXAlignment.Left
         button.Font = Enum.Font.GothamMedium
@@ -456,7 +456,7 @@ function AxionUI:CreateWindow(options)
                 button.BackgroundTransparency = 0.15
                 button.BorderSizePixel = 0
                 button.Text = "   " .. tostring(buttonOptions.Title or "Action") .. "     ›"
-                button.TextSize = 11
+                button.TextSize = 12
                 button.TextColor3 = AxionPalette.text
                 button.TextXAlignment = Enum.TextXAlignment.Left
                 button.Font = Enum.Font.GothamMedium
@@ -472,7 +472,7 @@ function AxionUI:CreateWindow(options)
                 button.MouseButton1Click:Connect(function()
                     if buttonOptions.Callback then
                         local ok, err = pcall(buttonOptions.Callback)
-                        if not ok then warn("[Xexer Dump] Button callback failed: " .. tostring(err)) end
+                        if not ok then warn("[AxionHub Dump] Button callback failed: " .. tostring(err)) end
                     end
                 end)
                 button.MouseEnter:Connect(function() stroke.Transparency = 0.25 end)
@@ -524,7 +524,7 @@ function AxionUI:CreateWindow(options)
                     render()
                     if fire and toggleOptions.Callback then
                         local ok, err = pcall(toggleOptions.Callback, value)
-                        if not ok then warn("[Xexer Dump] Toggle callback failed: " .. tostring(err)) end
+                        if not ok then warn("[AxionHub Dump] Toggle callback failed: " .. tostring(err)) end
                     end
                 end
                 render()
@@ -593,7 +593,7 @@ function AxionUI:CreateWindow(options)
                     render()
                     if dropOptions.Callback then
                         local ok, err = pcall(dropOptions.Callback, selected)
-                        if not ok then warn("[Xexer Dump] Dropdown callback failed: " .. tostring(err)) end
+                        if not ok then warn("[AxionHub Dump] Dropdown callback failed: " .. tostring(err)) end
                     end
                 end
                 for i, value in ipairs(values) do
@@ -640,11 +640,11 @@ end
 local WindUI = AxionUI
 
 -- Localization System (รองรับ TH / EN)
-local currentLang = _G.XexerLanguage or "EN"
+local currentLang = _G.AxionHubLanguage or "EN"
 local Loc = {
     EN = {
-        Title = "Xexer Dump",
-        Author = "by 777",
+        Title = "AxionHub Dump",
+        Author = "Dump Toolkit",
         Tag = "Ultimate Dumper",
         Tab1 = "Script Toolkit",
         Tab2 = "Remote Dumper",
@@ -681,7 +681,7 @@ local Loc = {
         StartDumpDesc = "Scan service hierarchy tree and save as .txt to workspace",
     },
     TH = {
-        Title = "Xexer Dump",
+        Title = "AxionHub Dump",
         Author = "โดย 777",
         Tag = "ระบบดึงข้อมูลขั้นสุดยอด",
         Tab1 = "ชุดเครื่องมือสคริปต์",
@@ -727,7 +727,7 @@ end
 -- AxionHub-inspired dark gradient theme.
 WindUI:AddTheme({ Name = "AxionHub" })
 
-local LOGO_ID = "rbxassetid://76489696691275"
+local LOGO_ID = "rbxassetid://10709819149"
 
 -- Create the main window through the built-in AxionHub-style adapter.
 local Window = WindUI:CreateWindow({
@@ -737,7 +737,7 @@ local Window = WindUI:CreateWindow({
     Theme = "AxionHub",
     Transparent = true,
     Topbar = { Height = 52, ButtonsType = "Mac" },
-    Size = UDim2.fromOffset(660, 500),
+    Size = UDim2.fromOffset(900, 540),
 })
 
 Window:EditOpenButton({
@@ -940,7 +940,7 @@ toolActSec:Button({
             end
 
             table.insert(fullOutput, "----------------------------------------------------------------------")
-            table.insert(fullOutput, "-- [XEXER DUMP: READY-TO-SCRIPT WORKSPACE]")
+            table.insert(fullOutput, "-- [AXIONHUB DUMP: READY-TO-SCRIPT WORKSPACE]")
             table.insert(fullOutput, "-- Place ID: " .. tostring(game.PlaceId) .. " | Job ID: " .. game.JobId)
             table.insert(fullOutput, "-- Generated: " .. os.date("%Y-%m-%d %H:%M:%S"))
             table.insert(fullOutput, "----------------------------------------------------------------------\n")
@@ -1027,7 +1027,7 @@ end
             end
 
             local elapsed = string.format("%.2f", os.clock() - startTime)
-            local fileName = string.format("XexerScriptDump_%s.txt", tostring(game.PlaceId))
+            local fileName = string.format("AxionHubScriptDump_%s.txt", tostring(game.PlaceId))
 
             if writefile then
                 writefile(fileName, table.concat(fullOutput, "\n"))
@@ -1099,7 +1099,7 @@ local function dumpAllRemotes()
             end)
         end
 
-        local fileName = string.format("Xexer_AllRemotes_%s.txt", tostring(game.PlaceId))
+        local fileName = string.format("AxionHub_AllRemotes_%s.txt", tostring(game.PlaceId))
         if writefile then
             writefile(fileName, table.concat(fullOutput, "\n"))
             setRemoteStatus("Saved: " .. fileName)
@@ -1191,7 +1191,7 @@ spySec:Button({
             table.insert(output, "")
         end
 
-        local fileName = string.format("Xexer_RemoteSpy_%s.txt", tostring(game.PlaceId))
+        local fileName = string.format("AxionHub_RemoteSpy_%s.txt", tostring(game.PlaceId))
         if writefile then
             writefile(fileName, table.concat(output, "\n"))
             WindUI:Notify({ Title = "Success", Content = "Saved " .. fileName, Icon = "check", Duration = 4 })
@@ -1314,7 +1314,7 @@ actionSec:Button({
             end
 
             local safeName = selected:gsub("%W", "")
-            local fileName = string.format("XexerDump_%s_%s.txt", safeName, tostring(game.PlaceId))
+            local fileName = string.format("AxionHubDump_%s_%s.txt", safeName, tostring(game.PlaceId))
 
             if writefile then
                 writefile(fileName, table.concat(output, "\n"))
