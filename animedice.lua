@@ -17,7 +17,7 @@ local AxionHub = {
 }
 
 -- Constants.
-local HUB_VERSION = "v20"
+local HUB_VERSION = "v21"
 local WHITE = Color3.new(1, 1, 1)
 local SIDEBAR_WIDTH = 150
 local CORNER_RADIUS = 12
@@ -27,7 +27,6 @@ local RELOAD_FILE = "AxionHub.lua"
 local LOGO_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/Untitled27_20261009042444.png"
 local LOGO_FILE = "AxionHub/logo.png"
 local ICONS_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/dist/Icons.lua"
-local DISCORD_URL = "https://discord.gg/yourinvite"
 local GRAPH_BARS = 48
 local SAFE_MAX_RATE = 30
 local WATCHDOG_TIMEOUT = 90
@@ -1031,14 +1030,21 @@ local function rejoinServer()
 	end)
 end
 
-local function copyDiscord()
+---Copy a link friends can use to join this exact server.
+local function copyServerLink()
 	if not setclipboard then
 		notify("Clipboard not supported", Config.bad)
 		return
 	end
 
-	setclipboard(DISCORD_URL)
-	notify("Copied Discord link", Config.good)
+	if game.JobId == "" then
+		notify("No server id here", Config.bad)
+		return
+	end
+
+	local link = string.format("https://www.roblox.com/games/start?placeId=%d&gameInstanceId=%s", game.PlaceId, game.JobId)
+	setclipboard(link)
+	notify("Copied server link", Config.good)
 end
 
 -- UI helpers.
@@ -1343,35 +1349,59 @@ end
 ---@return Frame
 local function buildHomePage(page)
 	-- Header with greeting and compact date / time.
-	local homeHeader = makeCard(page, UDim2.new(1, -90, 0, 50), UDim2.new(0, 18, 0, 16))
+	-- Narrower than the other headers so the window buttons stay clear.
+	local homeHeader = makeCard(page, UDim2.new(1, -120, 0, 50), UDim2.new(0, 18, 0, 16))
 
 	makeIcon(homeHeader, Icons.Home, UDim2.new(0, 20, 0, 20), UDim2.new(0, 14, 0.5, -10), Config.accentLight)
 
-	local greetingLabel = makeLabel(homeHeader, "", UDim2.new(0, 180, 0, 14), UDim2.new(0, 44, 0, 8), Config.font, 10, Config.accentLight)
-	local playerLabel = makeLabel(homeHeader, localPlayer.Name, UDim2.new(0, 180, 0, 20), UDim2.new(0, 44, 0, 22), Config.fontBold, 14, Config.text)
+	local greetingLabel = makeLabel(homeHeader, "", UDim2.new(0, 150, 0, 14), UDim2.new(0, 44, 0, 8), Config.font, 10, Config.accentLight)
+	local playerLabel = makeLabel(homeHeader, localPlayer.Name, UDim2.new(0, 150, 0, 20), UDim2.new(0, 44, 0, 22), Config.fontBold, 14, Config.text)
 	playerLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
-	local timeLabel = makeLabel(homeHeader, "", UDim2.new(0, 100, 0, 18), UDim2.new(1, -114, 0, 8), Config.fontBold, 15, Config.text, Enum.TextXAlignment.Right)
-	local dateLabel = makeLabel(homeHeader, "", UDim2.new(0, 100, 0, 12), UDim2.new(1, -114, 0, 28), Config.font, 9, Config.muted, Enum.TextXAlignment.Right)
+	local timeLabel = makeLabel(homeHeader, "", UDim2.new(0, 92, 0, 18), UDim2.new(1, -104, 0, 8), Config.fontBold, 15, Config.text, Enum.TextXAlignment.Right)
+	local dateLabel = makeLabel(homeHeader, "", UDim2.new(0, 92, 0, 12), UDim2.new(1, -104, 0, 28), Config.font, 9, Config.muted, Enum.TextXAlignment.Right)
 
-	-- Current game card.
+	-- Current game card with the game icon as a faded background.
 	local gameCard = makeCard(page, UDim2.new(1, -36, 0, 76), UDim2.new(0, 18, 0, 72))
 
-	local gameThumb = game.GameId ~= 0 and string.format("rbxthumb://type=GameIcon&id=%d&w=150&h=150", game.GameId) or Icons.Gamepad
+	local gameThumb = game.GameId ~= 0 and string.format("rbxthumb://type=GameIcon&id=%d&w=420&h=420", game.GameId) or Icons.Gamepad
 
-	local gameIcon = makeIcon(gameCard, gameThumb, UDim2.new(0, 52, 0, 52), UDim2.new(0, 12, 0, 12), WHITE)
+	local gameIcon = makeIcon(gameCard, gameThumb, UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), WHITE)
 	gameIcon.ScaleType = Enum.ScaleType.Crop
-	gameIcon.BackgroundTransparency = 0
-	gameIcon.BackgroundColor3 = Config.chipOff
-	createCorner(gameIcon, 10)
+	gameIcon.ImageTransparency = 0.72
+	gameIcon.ZIndex = 4
+	createCorner(gameIcon, CORNER_RADIUS)
 
-	local gameNameLabel = makeLabel(gameCard, "Loading...", UDim2.new(1, -86, 0, 16), UDim2.new(0, 74, 0, 10), Config.fontBold, 12.5, Config.text)
+	-- Dark shade keeps the ui tone and the text readable.
+	local gameShade = Instance.new("Frame")
+	gameShade.Size = UDim2.new(1, 0, 1, 0)
+	gameShade.BackgroundColor3 = Color3.new(0, 0, 0)
+	gameShade.BorderSizePixel = 0
+	gameShade.ZIndex = 5
+	gameShade.Parent = gameCard
+	createCorner(gameShade, CORNER_RADIUS)
+
+	local shadeGradient = Instance.new("UIGradient")
+	shadeGradient.Rotation = 0
+	shadeGradient.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.1),
+		NumberSequenceKeypoint.new(1, 0.55),
+	})
+	shadeGradient.Parent = gameShade
+
+	local gameNameLabel = makeLabel(gameCard, "Loading...", UDim2.new(1, -28, 0, 18), UDim2.new(0, 14, 0, 10), Config.fontBold, 14, Config.text)
 	gameNameLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
-	makeLabel(gameCard, "Place ID  " .. game.PlaceId, UDim2.new(1, -86, 0, 12), UDim2.new(0, 74, 0, 29), Config.font, 10, Config.muted)
+	local placeLabel = makeLabel(gameCard, "Place ID  " .. game.PlaceId, UDim2.new(1, -28, 0, 12), UDim2.new(0, 14, 0, 32), Config.fontMedium, 10, Config.textDim)
 
-	makeIcon(gameCard, Icons.Users, UDim2.new(0, 12, 0, 12), UDim2.new(0, 74, 0, 47), Config.good)
-	local playersLabel = makeLabel(gameCard, "", UDim2.new(1, -106, 0, 12), UDim2.new(0, 92, 0, 47), Config.fontMedium, 10, Config.good)
+	makeIcon(gameCard, Icons.Users, UDim2.new(0, 12, 0, 12), UDim2.new(0, 14, 0, 51), Config.good)
+	local playersLabel = makeLabel(gameCard, "", UDim2.new(1, -50, 0, 12), UDim2.new(0, 32, 0, 51), Config.fontMedium, 10, Config.good)
+
+	-- Keep the text above the shade and easy to read.
+	for _, label in ipairs({ gameNameLabel, placeLabel, playersLabel }) do
+		label.ZIndex = 7
+		label.TextStrokeTransparency = 0.75
+	end
 
 	-- Real game name and icon from the marketplace.
 	task.spawn(function()
@@ -1490,8 +1520,12 @@ local function buildHomePage(page)
 
 	makeLabel(actionsCard, "QUICK ACTIONS", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 6), Config.fontBold, 9.5, Config.accentLight)
 
-	local function makeAction(index, text, icon, callback)
-		local chip = makeChip(actionsCard, UDim2.new(0, 120, 0, 30), UDim2.new(0, 14 + (index - 1) * 128, 0, 24), text, 10, 999)
+	local actionX = 14
+
+	local function makeAction(text, width, icon, callback)
+		local chip = makeChip(actionsCard, UDim2.new(0, width, 0, 30), UDim2.new(0, actionX, 0, 24), text, 10, 999)
+		actionX = actionX + width + 12
+
 		chip.label.Position = UDim2.new(0, 22, 0, 0)
 		chip.label.Size = UDim2.new(1, -28, 1, 0)
 		makeIcon(chip.button, icon, UDim2.new(0, 14, 0, 14), UDim2.new(0, 12, 0.5, -7), Config.text)
@@ -1511,9 +1545,9 @@ local function buildHomePage(page)
 		end))
 	end
 
-	makeAction(1, "Server Hop", Icons.Hop, serverHop)
-	makeAction(2, "Rejoin", Icons.Refresh, rejoinServer)
-	makeAction(3, "Copy Discord", Icons.Link, copyDiscord)
+	makeAction("Server Hop", 108, Icons.Hop, serverHop)
+	makeAction("Rejoin", 92, Icons.Refresh, rejoinServer)
+	makeAction("Copy Server Link", 152, Icons.Link, copyServerLink)
 
 	-- Refresh every text on the page, fps is nil on the first pass.
 	local function refreshInfo(fps)
