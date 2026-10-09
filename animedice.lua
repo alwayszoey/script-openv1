@@ -1,4 +1,3 @@
--- Check for table that is shared between executions.
 if not shared then
 	return warn("No shared, no script.")
 end
@@ -16,7 +15,6 @@ local AxionHub = {
 	blur = nil,
 }
 
--- Constants.
 local HUB_VERSION = "v22"
 local WHITE = Color3.new(1, 1, 1)
 local SIDEBAR_WIDTH = 150
@@ -27,7 +25,6 @@ local RELOAD_FILE = "AxionHub.lua"
 local LOGO_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/Untitled27_20261009042444.png"
 local LOGO_FILE = "AxionHub/logo.png"
 local ICONS_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/dist/Icons.lua"
--- [แก้] ค่าใหม่สำหรับแคชไอคอนและเวลารอสูงสุด
 local ICONS_CACHE = "AxionHub/icons.lua"
 local ICON_WAIT = 4
 local REMOTE_WAIT = 30
@@ -55,7 +52,6 @@ local PERSIST_KEYS = {
 	"autoQuest",
 }
 
--- Default icons, used when the icon library is missing a name.
 local Icons = {
 	Logo = "rbxassetid://10709819149",
 	Search = "rbxassetid://10734943674",
@@ -86,13 +82,8 @@ local Icons = {
 	Link = "rbxassetid://10709812159",
 }
 
--- Icon library.
 local rawIcons = {}
 
----Accept an asset id, a url, or an icon name from the library.
----@param input string|number
----@param fallback string?
----@return string
 local function getIcon(input, fallback)
 	if type(input) == "number" then
 		return "rbxassetid://" .. input
@@ -119,9 +110,6 @@ local function getIcon(input, fallback)
 	return fallback or input
 end
 
--- [แก้] แยก parse ออกมา ใช้ร่วมกันทั้งแคชและดาวน์โหลด
----@param source string
----@return boolean
 local function parseIconSource(source)
 	local chunk = loadstring(source)
 	if not chunk then
@@ -137,8 +125,6 @@ local function parseIconSource(source)
 	return false
 end
 
----[แก้] อ่านจากแคชก่อน ถ้าไม่มีค่อย request แล้วเซฟลงไฟล์
----@return boolean
 local function loadIconLibrary()
 	if isfile and readfile and isfile(ICONS_CACHE) then
 		local ok, source = pcall(readfile, ICONS_CACHE)
@@ -162,7 +148,6 @@ local function loadIconLibrary()
 	return true
 end
 
--- Names in the library for each default icon. Missing names keep the default id.
 local ICON_NAMES = {
 	Dashboard = "layout-dashboard",
 	Settings = "settings",
@@ -190,7 +175,6 @@ local ICON_NAMES = {
 	Link = "link",
 }
 
--- [แก้] เรียกหลังโหลดไลบรารีเสร็จ แทนการรันที่ top-level
 local function applyIconNames()
 	for key, name in pairs(ICON_NAMES) do
 		Icons[key] = getIcon(name, Icons[key])
@@ -210,7 +194,6 @@ local cloneRef = cloneref or function(value)
 	return value
 end
 
--- Services.
 local playersService = cloneRef(game:GetService("Players"))
 local replicatedStorage = cloneRef(game:GetService("ReplicatedStorage"))
 local runService = cloneRef(game:GetService("RunService"))
@@ -286,13 +269,11 @@ local State = {
 	lastPlot = 0,
 	collectStarted = false,
 
-	-- Quests.
 	autoQuest = false,
 	questThread = nil,
 	questClaimed = 0,
 	questWarned = false,
 
-	-- AFK / protection.
 	antiAfk = true,
 	autoReconnect = true,
 	autoResume = true,
@@ -312,16 +293,13 @@ local State = {
 	minimized = false,
 	animating = false,
 
-	-- Home page.
 	frameCount = 0,
 	hopping = false,
 }
 
--- Filled by buildUI so logic code can reach the interface.
 local uiRefs = {}
 local notify = function() end
 
----Random identifier so the gui has no fixed name.
 local function randomName()
 	local chars = {}
 	for index = 1, math.random(10, 16) do
@@ -330,7 +308,6 @@ local function randomName()
 	return table.concat(chars)
 end
 
----Humanize a delay when safe mode is on.
 local function jitter(base)
 	if not State.safeMode then
 		return base
@@ -339,7 +316,6 @@ local function jitter(base)
 	return base * (0.8 + math.random() * 0.5)
 end
 
----Delay between spam rolls, capped in safe mode.
 local function getRollDelay()
 	local delay = State.spamSpeed
 
@@ -355,7 +331,6 @@ local function formatTime(seconds)
 	return string.format("%02d:%02d:%02d", seconds // 3600, (seconds % 3600) // 60, seconds % 60)
 end
 
----Parent that keeps the gui hidden from the game when possible.
 local function safeParent()
 	if type(gethui) == "function" then
 		local ok, hui = pcall(gethui)
@@ -367,8 +342,6 @@ local function safeParent()
 	return coreGui
 end
 
--- [แก้] ไม่รอแล้ว ใช้ FindFirstChild (เดิม WaitForChild 5 วิ ต่อ step)
----Walk a path of children without waiting.
 local function safeFind(root, ...)
 	local node = root
 
@@ -383,13 +356,11 @@ local function safeFind(root, ...)
 	return node
 end
 
----Keep a connection so detach can clean it up.
 local function track(connection)
 	table.insert(AxionHub.connections, connection)
 	return connection
 end
 
----Play a short ui sound.
 local function playSound(name)
 	local info = BubbleSoundMap[name]
 	if not State.uiSound or not info then
@@ -410,7 +381,6 @@ local function playSound(name)
 	end)
 end
 
----Download the logo through request, cache it, and turn it into an asset.
 local function resolveLogo()
 	if LOGO_URL == "" or not (getcustomasset and writefile and isfile) then
 		return Icons.Logo
@@ -434,9 +404,6 @@ local function resolveLogo()
 	return ok and asset or Icons.Logo
 end
 
--- Persistence.
-
----Save settings and what was running so a rejoin can resume.
 local function saveConfig()
 	if not writefile then
 		return
@@ -480,13 +447,10 @@ local function loadConfig()
 	State.resumeCollect = data.wasCollecting == true
 end
 
--- [แก้] resolve แบบเรียกซ้ำได้ ไม่บล็อก (เดิมเรียกครั้งเดียวด้วย WaitForChild)
 local Remotes = {}
 local remotesReady = false
 local collectReady = false
 
----Resolve every remote that is still missing. Returns true when all are found.
----@return boolean
 local function resolveRemotes()
 	Remotes.rollDice = Remotes.rollDice or safeFind(replicatedStorage, "Network", "RollService", "RF", "RollDice")
 	Remotes.setAutoRoll = Remotes.setAutoRoll or safeFind(replicatedStorage, "Network", "RollService", "RE", "SetAutoRoll")
@@ -506,7 +470,6 @@ local AntiFX = {
 	ccEffects = {},
 }
 
----Resolve the roll cutscene, impact frames and rolling gui.
 local function initAntiFX()
 	local rolling = safeFind(replicatedStorage, "Framework", "Features", "Rolling")
 	if rolling then
@@ -556,7 +519,6 @@ local function initAntiFX()
 	end
 end
 
----Hide the roll visuals every frame.
 local function tickAntiFX()
 	if not State.bypassAnim then
 		return
@@ -596,9 +558,6 @@ local function tickAntiFX()
 	end
 end
 
--- Dice / collect logic.
-
----Ask the server to run auto roll once.
 local function armAutoRoll()
 	if State.autoRollOn or not Remotes.setAutoRoll then
 		return
@@ -650,7 +609,6 @@ local function diceLoop()
 			delay = jitter(1)
 		end
 
-		-- Back off when the remote keeps failing.
 		if State.failStreak > 0 then
 			delay = delay + math.min(State.failStreak * 0.5, 8)
 		end
@@ -696,7 +654,6 @@ local function collectOnePlot(plotNumber)
 	State.lastPlot = plotNumber
 end
 
----Plot order, shuffled in safe mode so it is not a perfect sweep.
 local function buildPlotOrder()
 	local order = {}
 
@@ -749,12 +706,6 @@ local function stopCollect()
 	end
 end
 
--- Auto claim quests.
-
----Walk a path of children without waiting.
----@param root Instance?
----@param path table
----@return Instance?
 local function findPath(root, path)
 	local node = root
 
@@ -769,23 +720,16 @@ local function findPath(root, path)
 	return node
 end
 
----Menus.Quests.Quests.ScrollingFrame inside the player gui.
----@return Instance?
 local function getQuestList()
 	local playerGui = localPlayer:FindFirstChildOfClass("PlayerGui")
 	return findPath(playerGui, { "Root", "Menus", "Quests", "Quests", "ScrollingFrame" })
 end
 
----Daily / Weekly filter buttons.
----@return Instance?
 local function getQuestFilters()
 	local playerGui = localPlayer:FindFirstChildOfClass("PlayerGui")
 	return findPath(playerGui, { "Root", "Menus", "Quests", "Filters", "ScrollingFrame" })
 end
 
----Run the game's own handlers on a button so the real claim logic sends the remote.
----@param button Instance
----@return boolean
 local function pressButton(button)
 	if not (getconnections and button) then
 		return false
@@ -812,10 +756,6 @@ local function pressButton(button)
 	return false
 end
 
----A quest is ready when its bar is full and the claim button is not already claimed.
----@param quest Instance
----@param force boolean
----@return boolean, Instance?
 local function isQuestReady(quest, force)
 	if not quest:IsA("Frame") or quest.Name == "Template" then
 		return false
@@ -831,7 +771,6 @@ local function isQuestReady(quest, force)
 		return false
 	end
 
-	-- Skip ones the game already marks as claimed.
 	for _, descendant in ipairs(claim:GetDescendants()) do
 		if descendant:IsA("TextLabel") and descendant.Text:lower():find("claimed", 1, true) then
 			return false
@@ -851,9 +790,6 @@ local function isQuestReady(quest, force)
 	return true, claim
 end
 
----Scan the current quest list and claim every finished quest.
----@param force boolean
----@return number
 local function claimVisibleQuests(force)
 	local list = getQuestList()
 	if not list then
@@ -879,8 +815,6 @@ local function claimVisibleQuests(force)
 	return claimed
 end
 
----Switch the quest tab so Daily and Weekly both get checked.
----@param name string
 local function selectQuestFilter(name)
 	local filters = getQuestFilters()
 	local button = filters and filters:FindFirstChild(name)
@@ -905,7 +839,6 @@ local function questLoop()
 		else
 			State.questWarned = false
 
-			-- Every few passes press every visible claim in case the bar check misses.
 			local force = pass % 5 == 0
 			local claimed = 0
 
@@ -945,7 +878,6 @@ local function stopQuest()
 	end
 end
 
----Restart the dice loop if it silently stalls.
 local function watchdogLoop()
 	while AxionHub.alive do
 		task.wait(5)
@@ -960,9 +892,6 @@ local function watchdogLoop()
 	end
 end
 
--- AFK 24/7.
-
----Tiny fake input so the client never counts as idle.
 local function pulseIdle()
 	pcall(function()
 		virtualUser:CaptureController()
@@ -971,7 +900,6 @@ local function pulseIdle()
 end
 
 local function initAntiAfk()
-	-- Disable the default idle connections first.
 	if getconnections then
 		pcall(function()
 			for _, connection in ipairs(getconnections(localPlayer.Idled)) do
@@ -999,7 +927,6 @@ local function initAntiAfk()
 	end)
 end
 
----Re-run the script after the teleport when the file exists.
 local function queueReload()
 	if State.reloadQueued then
 		return
@@ -1013,7 +940,6 @@ local function queueReload()
 	pcall(queue_on_teleport, string.format('loadstring(readfile("%s"))()', RELOAD_FILE))
 end
 
----Retry teleporting with a growing delay until it works.
 local function reconnect()
 	if State.reconnecting or not State.autoReconnect or not AxionHub.alive then
 		return
@@ -1072,7 +998,6 @@ local function initReconnect()
 	end))
 end
 
----Low power: no 3D render and a low fps cap for long idle sessions.
 local function applyLowPower(on)
 	pcall(function()
 		runService:Set3dRenderingEnabled(not on)
@@ -1083,7 +1008,6 @@ local function applyLowPower(on)
 	end
 end
 
----Block client-side Kick calls on the local player.
 local function installAntiKick()
 	local oldNamecall
 	local namecallHook = newcclosure(function(self, ...)
@@ -1131,11 +1055,6 @@ local function installAntiKick()
 	end
 end
 
--- Home page logic.
-
----Greeting that follows the local hour.
----@param hour number
----@return string
 local function getGreeting(hour)
 	if hour >= 5 and hour < 12 then
 		return "Good morning"
@@ -1148,8 +1067,6 @@ local function getGreeting(hour)
 	return "Good evening"
 end
 
----Current ping in milliseconds.
----@return number
 local function getPing()
 	local ok, value = pcall(function()
 		return statsService.Network.ServerStatsItem["Data Ping"]:GetValue()
@@ -1166,7 +1083,6 @@ local function getPing()
 	return okPing and ping or 0
 end
 
----Teleport to a random public server that is not full.
 local function serverHop()
 	if State.hopping then
 		return
@@ -1221,7 +1137,6 @@ local function serverHop()
 			return
 		end
 
-		-- Save first so auto resume works after the hop.
 		saveConfig()
 		notify("Hopping server...", Config.good)
 
@@ -1239,7 +1154,6 @@ local function serverHop()
 	end)
 end
 
----Join the same server again, or the place if the server is empty.
 local function rejoinServer()
 	if State.hopping then
 		return
@@ -1266,7 +1180,6 @@ local function rejoinServer()
 	end)
 end
 
----Copy a link friends can use to join this exact server.
 local function copyServerLink()
 	if not setclipboard then
 		notify("Clipboard not supported", Config.bad)
@@ -1282,8 +1195,6 @@ local function copyServerLink()
 	setclipboard(link)
 	notify("Copied server link", Config.good)
 end
-
--- UI helpers.
 
 local function tween(object, duration, goal, style, direction)
 	local info = TweenInfo.new(duration, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out)
@@ -1305,7 +1216,6 @@ local function createGradient(parent, rotation, colorSequence)
 	return gradient
 end
 
----Register a gradient that slowly rotates.
 local function spin(gradient, speed)
 	table.insert(AxionHub.spinners, {
 		gradient = gradient,
@@ -1329,7 +1239,6 @@ local function createStroke(parent, thickness, transparency)
 	return stroke, gradient
 end
 
----Image icon used across the interface. Accepts an id, url, or library name.
 local function makeIcon(parent, image, size, position, color)
 	local icon = Instance.new("ImageLabel")
 	icon.Size = size
@@ -1358,18 +1267,15 @@ local function makeLabel(parent, text, size, position, font, textSize, color, al
 	return label
 end
 
--- [แก้] โลโก้ใช้ fallback ก่อน แล้วอัปเดตทุก label ทีหลังเมื่อโหลดเสร็จ
 local currentLogo = Icons.Logo
 local logoLabels = {}
 
----ลงทะเบียน ImageLabel ที่เป็นโลโก้ เพื่อให้ setLogo สลับรูปได้
 local function registerLogo(label)
 	table.insert(logoLabels, label)
 	label.Image = currentLogo
 	return label
 end
 
----สลับโลโก้ทุกที่ที่ลงทะเบียนไว้
 local function setLogo(asset)
 	currentLogo = asset
 
@@ -1380,7 +1286,6 @@ local function setLogo(asset)
 	end
 end
 
----ถ้ามีไฟล์โลโก้ในแคชแล้วใช้ได้ทันที ไม่ต้อง request
 local function resolveCachedLogo()
 	if not (getcustomasset and isfile and isfile(LOGO_FILE)) then
 		return nil
@@ -1390,7 +1295,6 @@ local function resolveCachedLogo()
 	return ok and asset or nil
 end
 
--- Loading screen.
 local Loading = {
 	gui = nil,
 	root = nil,
@@ -1401,7 +1305,12 @@ local Loading = {
 	targetProgress = 0,
 }
 
----[แก้] หน้าโหลด สร้างทันทีตอนเริ่มสคริปต์ ใช้โลโก้ fallback
+local function getLoadingScale()
+	local camera = workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return math.clamp(math.min(viewport.X * 0.9 / 340, viewport.Y * 0.8 / 240, 1), 0.5, 1)
+end
+
 local function createLoadingScreen()
 	local gui = Instance.new("ScreenGui")
 	gui.Name = randomName()
@@ -1411,34 +1320,77 @@ local function createLoadingScreen()
 	gui.DisplayOrder = 1000
 	gui.Parent = safeParent()
 
-	-- CanvasGroup ทำให้ fade ทั้งหน้าด้วยค่าเดียว
 	local root = Instance.new("CanvasGroup")
 	root.Size = UDim2.new(1, 0, 1, 0)
-	root.BackgroundColor3 = WHITE
+	root.BackgroundTransparency = 1
 	root.BorderSizePixel = 0
 	root.GroupTransparency = 1
-	root.Active = true
 	root.Parent = gui
-	createGradient(root, 115, ColorSequence.new(Config.bgTop, Config.bgBot))
 
-	local logo = makeIcon(root, currentLogo, UDim2.new(0, 84, 0, 84), UDim2.new(0.5, -42, 0.5, -112), WHITE)
+	local overlay = Instance.new("Frame")
+	overlay.Size = UDim2.new(1, 0, 1, 0)
+	overlay.BackgroundColor3 = WHITE
+	overlay.BackgroundTransparency = 0.55
+	overlay.BorderSizePixel = 0
+	overlay.Active = true
+	overlay.ZIndex = 1
+	overlay.Parent = root
+	createGradient(overlay, 115, ColorSequence.new(Config.bgTop, Config.bgBot))
+
+	local holder = Instance.new("Frame")
+	holder.Size = UDim2.new(0, 320, 0, 220)
+	holder.AnchorPoint = Vector2.new(0.5, 0.5)
+	holder.Position = UDim2.new(0.5, 0, 0.5, 0)
+	holder.BackgroundTransparency = 1
+	holder.BorderSizePixel = 0
+	holder.ZIndex = 2
+	holder.Parent = root
+
+	local holderScale = Instance.new("UIScale")
+	holderScale.Scale = getLoadingScale()
+	holderScale.Parent = holder
+
+	local glow = Instance.new("ImageLabel")
+	glow.Size = UDim2.new(1, 70, 1, 70)
+	glow.Position = UDim2.new(0, -35, 0, -35)
+	glow.BackgroundTransparency = 1
+	glow.Image = "rbxassetid://5028857084"
+	glow.ImageColor3 = Config.accentPink
+	glow.ImageTransparency = 0.6
+	glow.ScaleType = Enum.ScaleType.Slice
+	glow.SliceCenter = Rect.new(24, 24, 276, 276)
+	glow.ZIndex = 2
+	glow.Parent = holder
+
+	local card = Instance.new("Frame")
+	card.Size = UDim2.new(1, 0, 1, 0)
+	card.BackgroundColor3 = WHITE
+	card.BackgroundTransparency = 0.03
+	card.BorderSizePixel = 0
+	card.ZIndex = 3
+	card.Parent = holder
+	createCorner(card, 18)
+	createGradient(card, 110, ColorSequence.new(Config.bgTop, Config.bgBot))
+	createStroke(card, 1.5, 0.35)
+
+	local logo = makeIcon(card, currentLogo, UDim2.new(0, 72, 0, 72), UDim2.new(0.5, -36, 0, 20), WHITE)
 	logo.ScaleType = Enum.ScaleType.Fit
+	logo.ZIndex = 5
 	registerLogo(logo)
 
 	local logoScale = Instance.new("UIScale")
 	logoScale.Parent = logo
 
-	makeLabel(root, "AxionHub", UDim2.new(0, 300, 0, 28), UDim2.new(0.5, -150, 0.5, -20), Config.fontBold, 22, Config.text, Enum.TextXAlignment.Center)
-
-	local stepLabel = makeLabel(root, "Starting...", UDim2.new(0, 300, 0, 16), UDim2.new(0.5, -150, 0.5, 14), Config.fontMedium, 11, Config.textDim, Enum.TextXAlignment.Center)
+	local nameLabel = makeLabel(card, "AxionHub", UDim2.new(1, -40, 0, 26), UDim2.new(0, 20, 0, 100), Config.fontBold, 20, Config.text, Enum.TextXAlignment.Center)
+	nameLabel.ZIndex = 5
 
 	local barTrack = Instance.new("Frame")
-	barTrack.Size = UDim2.new(0, 260, 0, 8)
-	barTrack.Position = UDim2.new(0.5, -130, 0.5, 44)
+	barTrack.Size = UDim2.new(1, -80, 0, 8)
+	barTrack.Position = UDim2.new(0, 40, 0, 146)
 	barTrack.BackgroundColor3 = Config.track
 	barTrack.BorderSizePixel = 0
 	barTrack.ZIndex = 4
-	barTrack.Parent = root
+	barTrack.Parent = card
 	createCorner(barTrack, 999)
 
 	local fill = Instance.new("Frame")
@@ -1450,14 +1402,17 @@ local function createLoadingScreen()
 	createCorner(fill, 999)
 	local fillGradient = createGradient(fill, 0, accentSequence())
 
-	local percent = makeLabel(root, "0%", UDim2.new(0, 260, 0, 14), UDim2.new(0.5, -130, 0.5, 58), Config.font, 10, Config.muted, Enum.TextXAlignment.Center)
+	local stepLabel = makeLabel(card, "Starting...", UDim2.new(1, -40, 0, 16), UDim2.new(0, 20, 0, 164), Config.fontMedium, 11, Config.textDim, Enum.TextXAlignment.Center)
+	stepLabel.ZIndex = 5
+
+	local percent = makeLabel(card, "0%", UDim2.new(1, -40, 0, 14), UDim2.new(0, 20, 0, 184), Config.font, 10, Config.muted, Enum.TextXAlignment.Center)
+	percent.ZIndex = 5
 
 	Loading.gui = gui
 	Loading.root = root
 	Loading.logo = logo
 	Loading.stepLabel = stepLabel
 
-	-- [แก้] ขับ progress ด้วย Heartbeat (ไม่ใช้ task.spawn loop) ลื่นเท่าเฟรมเรต
 	Loading.connection = runService.Heartbeat:Connect(function(dt)
 		local diff = Loading.targetProgress - Loading.progress
 		Loading.progress = Loading.progress + diff * math.min(dt * 6, 1)
@@ -1468,12 +1423,12 @@ local function createLoadingScreen()
 		local now = os.clock()
 		logoScale.Scale = 1 + math.sin(now * 3) * 0.04
 		fillGradient.Offset = Vector2.new(math.sin(now * 2) * 0.25, 0)
+		holderScale.Scale = getLoadingScale()
 	end)
 
 	tween(root, 0.3, { GroupTransparency = 0 })
 end
 
----อัปเดตข้อความและเป้าหมาย progress
 local function setStep(text, progress)
 	if not Loading.gui then
 		return
@@ -1483,7 +1438,6 @@ local function setStep(text, progress)
 	Loading.targetProgress = progress
 end
 
----ลบหน้าโหลดทันที ใช้ตอน detach / error
 local function cleanupLoading()
 	if Loading.connection then
 		Loading.connection:Disconnect()
@@ -1500,7 +1454,6 @@ local function cleanupLoading()
 	Loading.root = nil
 end
 
----รอ bar ถึง 100% แล้ว fade out
 local function destroyLoadingScreen()
 	if not Loading.gui then
 		return
@@ -1540,7 +1493,6 @@ local function makeCard(parent, size, position)
 	return card
 end
 
----A page is a plain frame that slides in.
 local function makePage(parent)
 	local page = Instance.new("Frame")
 	page.Size = UDim2.new(1, 0, 1, 0)
@@ -1707,7 +1659,6 @@ local function stylePill(parts, on, instant)
 	tween(parts.knob, 0.3, knobGoal, Enum.EasingStyle.Back)
 end
 
----Toggle row. iconImage can be an asset id, a url, or an icon name.
 local function makeToggle(parent, y, title, defaultOn, callback, iconImage)
 	local row = Instance.new("Frame")
 	row.Size = UDim2.new(1, 0, 0, 40)
@@ -1746,12 +1697,7 @@ local function makeToggle(parent, y, title, defaultOn, callback, iconImage)
 	}
 end
 
----Home page: greeting, current game, system stats and quick actions.
----@param page Frame
----@return Frame
 local function buildHomePage(page)
-	-- Header with greeting and compact date / time.
-	-- Narrower than the other headers so the window buttons stay clear.
 	local homeHeader = makeCard(page, UDim2.new(1, -120, 0, 50), UDim2.new(0, 18, 0, 16))
 
 	makeIcon(homeHeader, Icons.Home, UDim2.new(0, 20, 0, 20), UDim2.new(0, 14, 0.5, -10), Config.accentLight)
@@ -1763,7 +1709,6 @@ local function buildHomePage(page)
 	local timeLabel = makeLabel(homeHeader, "", UDim2.new(0, 92, 0, 18), UDim2.new(1, -104, 0, 8), Config.fontBold, 15, Config.text, Enum.TextXAlignment.Right)
 	local dateLabel = makeLabel(homeHeader, "", UDim2.new(0, 92, 0, 12), UDim2.new(1, -104, 0, 28), Config.font, 9, Config.muted, Enum.TextXAlignment.Right)
 
-	-- Current game card with the game icon as a faded background.
 	local gameCard = makeCard(page, UDim2.new(1, -36, 0, 76), UDim2.new(0, 18, 0, 72))
 
 	local gameThumb = game.GameId ~= 0 and string.format("rbxthumb://type=GameIcon&id=%d&w=420&h=420", game.GameId) or Icons.Gamepad
@@ -1774,7 +1719,6 @@ local function buildHomePage(page)
 	gameIcon.ZIndex = 4
 	createCorner(gameIcon, CORNER_RADIUS)
 
-	-- Dark shade keeps the ui tone and the text readable.
 	local gameShade = Instance.new("Frame")
 	gameShade.Size = UDim2.new(1, 0, 1, 0)
 	gameShade.BackgroundColor3 = Color3.new(0, 0, 0)
@@ -1791,7 +1735,6 @@ local function buildHomePage(page)
 	})
 	shadeGradient.Parent = gameShade
 
-	-- Small game icon on the left.
 	local smallIcon = makeIcon(gameCard, gameThumb, UDim2.new(0, 56, 0, 56), UDim2.new(0, 10, 0.5, -28), WHITE)
 	smallIcon.ScaleType = Enum.ScaleType.Crop
 	smallIcon.ZIndex = 7
@@ -1807,13 +1750,11 @@ local function buildHomePage(page)
 	usersIcon.ZIndex = 7
 	local playersLabel = makeLabel(gameCard, "", UDim2.new(1, -110, 0, 12), UDim2.new(0, 94, 0, 51), Config.fontMedium, 10, Config.good)
 
-	-- Keep the text above the shade and easy to read.
 	for _, label in ipairs({ gameNameLabel, placeLabel, playersLabel }) do
 		label.ZIndex = 7
 		label.TextStrokeTransparency = 0.75
 	end
 
-	-- Real game name and icon from the marketplace.
 	task.spawn(function()
 		local ok, info = pcall(function()
 			return marketplaceService:GetProductInfo(game.PlaceId)
@@ -1838,7 +1779,6 @@ local function buildHomePage(page)
 		end
 	end)
 
-	-- System stats card.
 	local statsCard = makeCard(page, UDim2.new(1, -36, 0, 120), UDim2.new(0, 18, 0, 154))
 
 	makeLabel(statsCard, "SYSTEM & PERFORMANCE", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
@@ -1865,7 +1805,6 @@ local function buildHomePage(page)
 	local fpsValue = makeStat(3, "FPS", "--")
 	local pingValue = makeStat(4, "PING", "--")
 
-	-- Small fps graph made of bars.
 	local graph = Instance.new("Frame")
 	graph.Size = UDim2.new(1, -28, 0, 44)
 	graph.Position = UDim2.new(0, 14, 0, 68)
@@ -1897,7 +1836,6 @@ local function buildHomePage(page)
 		history[index] = 0
 	end
 
-	---Color that matches how healthy the fps is.
 	local function fpsColor(value)
 		if value >= 50 then
 			return Config.good
@@ -1927,7 +1865,6 @@ local function buildHomePage(page)
 		end
 	end
 
-	-- Quick actions card.
 	local actionsCard = makeCard(page, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 280))
 
 	makeLabel(actionsCard, "QUICK ACTIONS", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 6), Config.fontBold, 9.5, Config.accentLight)
@@ -1961,7 +1898,6 @@ local function buildHomePage(page)
 	makeAction("Rejoin", 92, Icons.Refresh, rejoinServer)
 	makeAction("Copy Server Link", 152, Icons.Link, copyServerLink)
 
-	-- Refresh every text on the page, fps is nil on the first pass.
 	local function refreshInfo(fps)
 		local now = os.date("*t")
 		greetingLabel.Text = getGreeting(now.hour)
@@ -2005,10 +1941,8 @@ local function buildHomePage(page)
 	return homeHeader
 end
 
----Build the whole interface.
 local function buildUI()
 	local parent = safeParent()
-	-- [แก้] ใช้โลโก้ปัจจุบัน (fallback หรือแคช) ไม่ request ที่นี่แล้ว
 	local logo = currentLogo
 
 	local gui = Instance.new("ScreenGui")
@@ -2020,7 +1954,6 @@ local function buildUI()
 	gui.Parent = parent
 	AxionHub.gui = gui
 
-	-- Minimized launcher.
 	local miniBtn = Instance.new("TextButton")
 	miniBtn.Size = UDim2.new(0, 48, 0, 48)
 	miniBtn.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -2041,10 +1974,8 @@ local function buildUI()
 	miniScale.Scale = 0
 	miniScale.Parent = miniBtn
 
-	-- [แก้] ลงทะเบียนโลโก้ เพื่อให้สลับรูปทีหลังได้
 	registerLogo(makeIcon(miniBtn, logo, UDim2.new(1, -12, 1, -12), UDim2.new(0, 6, 0, 6)))
 
-	-- Scale the window to fit any screen (phone, tablet, pc).
 	local function getBaseScale()
 		local camera = workspace.CurrentCamera
 		local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
@@ -2073,7 +2004,6 @@ local function buildUI()
 	winScale.Scale = baseScale * 0.85
 	winScale.Parent = win
 
-	-- Veil fades the whole window in and out.
 	local veil = Instance.new("Frame")
 	veil.Size = UDim2.new(1, 0, 1, 0)
 	veil.BackgroundColor3 = Config.bgBot
@@ -2094,7 +2024,6 @@ local function buildUI()
 	createCorner(sidebar, CORNER_RADIUS + 4)
 	createGradient(sidebar, 90, ColorSequence.new(Config.sidebarTop, Config.sidebarBot))
 
-	-- Big logo with no background while the window is open.
 	local sidebarLogo = registerLogo(makeIcon(sidebar, logo, UDim2.new(0, 68, 0, 68), UDim2.new(0, 12, 0, 4), WHITE))
 	sidebarLogo.ScaleType = Enum.ScaleType.Fit
 	sidebarLogo.ZIndex = 3
@@ -2163,7 +2092,6 @@ local function buildUI()
 	local afkPage = makePage(content)
 	local pageFrames = { HOME = homePage, MAIN = mainPage, SETTINGS = settingsPage, AFK = afkPage }
 
-	-- Toast notification that slides up from the bottom.
 	local toast = Instance.new("Frame")
 	toast.Size = UDim2.new(0, 250, 0, 28)
 	toast.AnchorPoint = Vector2.new(0.5, 0)
@@ -2212,10 +2140,8 @@ local function buildUI()
 		end)
 	end
 
-	-- Home page.
 	local homeHeader = buildHomePage(homePage)
 
-	-- Main page.
 	local header = makeCard(mainPage, UDim2.new(1, -90, 0, 42), UDim2.new(0, 18, 0, 16))
 
 	local dot = Instance.new("Frame")
@@ -2283,7 +2209,6 @@ local function buildUI()
 		saveConfig()
 	end, Icons.Zap)
 
-	-- Speed card.
 	local speedCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 212))
 
 	makeLabel(speedCard, "SPAM SPEED", UDim2.new(0.5, 0, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
@@ -2381,7 +2306,6 @@ local function buildUI()
 		end
 	end))
 
-	-- Collect card.
 	local collectCard = makeCard(mainPage, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 284))
 
 	uiRefs.collect = makeToggle(collectCard, 4, "AFK Collect Money", State.autoCollect, function(value)
@@ -2405,7 +2329,6 @@ local function buildUI()
 		Config.accentLight
 	)
 
-	-- Quest card.
 	local questCard = makeCard(mainPage, UDim2.new(1, -36, 0, 46), UDim2.new(0, 18, 0, 354))
 
 	uiRefs.quest = makeToggle(questCard, 3, "Auto Claim Quests", State.autoQuest, function(value)
@@ -2419,7 +2342,6 @@ local function buildUI()
 		saveConfig()
 	end, Icons.Check)
 
-	-- Settings page.
 	local settingsHeader = makeCard(settingsPage, UDim2.new(1, -90, 0, 42), UDim2.new(0, 18, 0, 16))
 
 	makeIcon(settingsHeader, Icons.Settings, UDim2.new(0, 16, 0, 16), UDim2.new(0, 16, 0.5, -8), Config.accentLight)
@@ -2481,7 +2403,6 @@ local function buildUI()
 		styleChip(chip, State.plotMax == value, true)
 	end
 
-	-- AFK & protection page.
 	local afkHeader = makeCard(afkPage, UDim2.new(1, -90, 0, 42), UDim2.new(0, 18, 0, 16))
 
 	makeIcon(afkHeader, Icons.Server, UDim2.new(0, 16, 0, 16), UDim2.new(0, 16, 0.5, -8), Config.accentLight)
@@ -2531,7 +2452,6 @@ local function buildUI()
 		updateSpeedText()
 	end)
 
-	-- Live status updater.
 	task.spawn(function()
 		while statusLabel.Parent and AxionHub.alive do
 			local status = remotesReady and (State.running and "RUNNING" or "IDLE") or "NO REMOTES"
@@ -2557,7 +2477,6 @@ local function buildUI()
 		end
 	end)
 
-	-- Page switching with a slide + fade.
 	local function applyPage(instant)
 		for id, data in pairs(pageButtons) do
 			local on = id == State.page
@@ -2592,7 +2511,6 @@ local function buildUI()
 		end))
 	end
 
-	-- Window buttons.
 	local topButtons = Instance.new("Frame")
 	topButtons.Size = UDim2.new(0, 54, 0, 22)
 	topButtons.Position = UDim2.new(1, -68, 0, 26)
@@ -2628,14 +2546,12 @@ local function buildUI()
 		tween(closeBtn, 0.15, { BackgroundColor3 = Color3.fromRGB(120, 32, 62) })
 	end))
 
-	-- Blur sits under the camera, not in Lighting.
 	local blur = Instance.new("BlurEffect")
 	blur.Name = randomName()
 	blur.Size = 0
 	blur.Parent = workspace.CurrentCamera or lighting
 	AxionHub.blur = blur
 
-	-- Open / close animations.
 	local function showWindow()
 		State.minimized = false
 		State.animating = true
@@ -2711,7 +2627,6 @@ local function buildUI()
 
 		playSound("Click")
 
-		-- Stop first so the saved config does not auto resume next run.
 		pcall(stopDice)
 		pcall(stopCollect)
 		pcall(stopQuest)
@@ -2733,7 +2648,6 @@ local function buildUI()
 		end
 	end))
 
-	-- Window drag via the header cards.
 	local draggingWindow = false
 	local dragStart, startPosition
 
@@ -2768,7 +2682,6 @@ local function buildUI()
 		end
 	end))
 
-	-- Keep the size correct when the screen changes (rotate, resize).
 	local camera = workspace.CurrentCamera
 	if camera then
 		track(camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
@@ -2785,11 +2698,9 @@ local function buildUI()
 	return gui
 end
 
----Stop everything and remove the interface.
 function AxionHub.detach()
 	AxionHub.alive = false
 
-	-- [แก้] ลบหน้าโหลดด้วย ถ้ายังค้างอยู่
 	cleanupLoading()
 
 	pcall(stopDice)
@@ -2826,7 +2737,6 @@ function AxionHub.detach()
 	end
 end
 
----Spin the gradients and run the roll visual killer.
 local function onHeartbeat()
 	State.frameCount = State.frameCount + 1
 	tickAntiFX()
@@ -2841,7 +2751,6 @@ local function onHeartbeat()
 	end
 end
 
----Wire up the anti-fx loops, remotes, afk systems and the interface.
 local function initializeScript()
 	loadConfig()
 
@@ -2851,24 +2760,20 @@ local function initializeScript()
 	local okFps, fps = pcall(getfpscap)
 	State.origFps = okFps and tonumber(fps) or 60
 
-	-- [แก้] แสดงหน้าโหลดทันที ใช้โลโก้จากแคชหรือ fallback
 	local cachedLogo = resolveCachedLogo()
 	currentLogo = cachedLogo or Icons.Logo
 	createLoadingScreen()
 	setStep("Starting...", 0.05)
 
-	-- [แก้] รอให้เฟรมแรกวาดก่อน ค่อยเริ่มงานที่อาจบล็อก
 	runService.Heartbeat:Wait()
 	runService.Heartbeat:Wait()
 
-	-- [แก้] ไอคอนโหลดใน thread แยก
 	local iconsDone = false
 	task.spawn(function()
 		pcall(loadIconLibrary)
 		iconsDone = true
 	end)
 
-	-- [แก้] โลโก้ไม่มีแคช: โหลดเบื้องหลังแล้วค่อยสลับ
 	if not cachedLogo then
 		task.spawn(function()
 			local asset = resolveLogo()
@@ -2890,7 +2795,6 @@ local function initializeScript()
 
 	track(runService.Heartbeat:Connect(onHeartbeat))
 
-	-- [แก้] remotes: เช็คทันทีหนึ่งรอบ ที่เหลือ poll เบื้องหลัง
 	setStep("Finding remotes...", 0.45)
 	resolveRemotes()
 
@@ -2922,7 +2826,6 @@ local function initializeScript()
 		hookRollMessage()
 	end)
 
-	-- Resume collecting after respawn.
 	track(localPlayer.CharacterAdded:Connect(function()
 		task.wait(2)
 		if State.collectStarted and not State.autoCollect then
@@ -2938,7 +2841,6 @@ local function initializeScript()
 
 	task.spawn(watchdogLoop)
 
-	-- [แก้] รอไอคอนไม่เกิน ICON_WAIT วิ (thread นี้ yield หน้าโหลดจึงขยับต่อ)
 	setStep("Loading icons...", 0.7)
 
 	local iconDeadline = os.clock() + ICON_WAIT
@@ -2948,7 +2850,6 @@ local function initializeScript()
 
 	applyIconNames()
 
-	-- The toggle is built from the saved value, the loop starts after the ui exists.
 	local resumeQuest = State.autoQuest
 	State.autoQuest = false
 
@@ -2969,14 +2870,12 @@ local function initializeScript()
 		uiRefs.quest.set(true)
 	end
 
-	-- Pick the work back up after a rejoin.
 	if State.autoResume then
 		task.delay(1.5, function()
 			if not AxionHub.alive then
 				return
 			end
 
-			-- [แก้] รอ remotes พร้อมก่อน resume
 			local function waitFor(condition)
 				local deadline = os.clock() + REMOTE_WAIT
 				while AxionHub.alive and not condition() and os.clock() < deadline do
@@ -3007,8 +2906,6 @@ local function initializeScript()
 	end
 end
 
----This is called when initialization errors.
----@param error string
 local function onInitializeError(error)
 	warn("[AxionHub] Failed to initialize.")
 	warn(error)
@@ -3016,7 +2913,6 @@ local function onInitializeError(error)
 	AxionHub.detach()
 end
 
--- Detach the previous execution before starting a new one.
 if shared.AxionHub then
 	pcall(shared.AxionHub.detach)
 end
