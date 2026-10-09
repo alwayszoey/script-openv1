@@ -17,7 +17,7 @@ local AxionHub = {
 }
 
 -- Constants.
-local HUB_VERSION = "v21"
+local HUB_VERSION = "v22"
 local WHITE = Color3.new(1, 1, 1)
 local SIDEBAR_WIDTH = 150
 local CORNER_RADIUS = 12
@@ -32,6 +32,7 @@ local SAFE_MAX_RATE = 30
 local WATCHDOG_TIMEOUT = 90
 local IDLE_PULSE_MIN = 90
 local IDLE_PULSE_MAX = 180
+local QUEST_INTERVAL = 6
 local TOGGLE_KEY = Enum.KeyCode.RightShift
 local PERSIST_KEYS = {
 	"mode",
@@ -47,6 +48,7 @@ local PERSIST_KEYS = {
 	"antiKick",
 	"safeMode",
 	"uiSound",
+	"autoQuest",
 }
 
 -- Default icons, used when the icon library is missing a name.
@@ -143,7 +145,7 @@ local ICON_NAMES = {
 	Bell = "bell",
 	Check = "check",
 	Close = "x",
-	Minimize = "minus",
+	Minimize = "minimize-2",
 	Copy = "copy",
 	Refresh = "refresh-cw",
 	Zap = "zap",
@@ -253,6 +255,12 @@ local State = {
 	collected = 0,
 	lastPlot = 0,
 	collectStarted = false,
+
+	-- Quests.
+	autoQuest = false,
+	questThread = nil,
+	questClaimed = 0,
+	questWarned = false,
 
 	-- AFK / protection.
 	antiAfk = true,
@@ -706,6 +714,202 @@ local function stopCollect()
 	if State.collectThread then
 		pcall(task.cancel, State.collectThread)
 		State.collectThread = nil
+	end
+end
+
+-- Auto claim quests.
+
+---Walk a path of children without waiting.
+---@param root Instance?
+---@param path table
+---@return Instance?
+local function findPath(root, path)
+	local node = root
+
+	for _, name in ipairs(path) do
+		if not node then
+			return nil
+		end
+
+		node = node:FindFirstChild(name)
+	end
+
+	return node
+end
+
+---Menus.Quests.Quests.ScrollingFrame inside the player gui.
+---@return Instance?
+local function getQuestList()
+	local playerGui = localPlayer:FindFirstChildOfClass("PlayerGui")
+	return findPath(playerGui, { "Root", "Menus", "Quests", "Quests", "ScrollingFrame" })
+end
+
+---Daily / Weekly filter buttons.
+---@return Instance?
+local function getQuestFilters()
+	local playerGui = localPlayer:FindFirstChildOfClass("PlayerGui")
+	return findPath(playerGui, { "Root", "Menus", "Quests", "Filters", "ScrollingFrame" })
+end
+
+---Run the game's own handlers on a button so the real claim logic sends the remote.
+---@param button Instance
+---@return boolean
+local function pressButton(button)
+	if not (getconnections and button) then
+		return false
+	end
+
+	for _, signalName in ipairs({ "Activated", "MouseButton1Click", "MouseButton1Down" }) do
+		local ok, connections = pcall(getconnections, button[signalName])
+
+		if ok and type(connections) == "table" and #connections > 0 then
+			for _, connection in ipairs(connections) do
+				pcall(function()
+					connection:Fire()
+				end)
+			end
+
+			return true
+		end
+	end
+
+	if firesignal then
+		return pcall(firesignal, button.Activated)
+	end
+
+	return false
+end
+
+---A quest is ready when its bar is full and the claim button is not already claimed.
+---@param quest Instance
+---@param force boolean
+---@return boolean, Instance?
+local function isQuestReady(quest, force)
+	if not quest:IsA("Frame") or quest.Name == "Template" then
+		return false
+	end
+
+	local buttons = quest:FindFirstChild("Buttons")
+	local claim = buttons and buttons:FindFirstChild("Claim")
+	if not claim or not claim:IsA("GuiButton") then
+		return false
+	end
+
+	if not quest.Visible or not claim.Visible then
+		return false
+	end
+
+	-- Skip ones the game already marks as claimed.
+	for _, descendant in ipairs(claim:GetDescendants()) do
+		if descendant:IsA("TextLabel") and descendant.Text:lower():find("claimed", 1, true) then
+			return false
+		end
+	end
+
+	if force then
+		return true, claim
+	end
+
+	local bar = quest:FindFirstChild("Bar")
+	local fill = bar and bar:FindFirstChild("Frame")
+	if fill and fill:IsA("GuiObject") and fill.Size.X.Scale < 0.98 and fill.Size.X.Offset <= 0 then
+		return false
+	end
+
+	return true, claim
+end
+
+---Scan the current quest list and claim every finished quest.
+---@param force boolean
+---@return number
+local function claimVisibleQuests(force)
+	local list = getQuestList()
+	if not list then
+		return 0
+	end
+
+	local claimed = 0
+
+	for _, quest in ipairs(list:GetChildren()) do
+		if not State.autoQuest or not AxionHub.alive then
+			break
+		end
+
+		local ready, claim = isQuestReady(quest, force)
+
+		if ready and claim and pressButton(claim) then
+			claimed = claimed + 1
+			State.questClaimed = State.questClaimed + 1
+			task.wait(jitter(0.25))
+		end
+	end
+
+	return claimed
+end
+
+---Switch the quest tab so Daily and Weekly both get checked.
+---@param name string
+local function selectQuestFilter(name)
+	local filters = getQuestFilters()
+	local button = filters and filters:FindFirstChild(name)
+
+	if button and button:IsA("GuiButton") then
+		pressButton(button)
+		task.wait(0.4)
+	end
+end
+
+local function questLoop()
+	local pass = 0
+
+	while State.autoQuest and AxionHub.alive do
+		pass = pass + 1
+
+		if not getQuestList() then
+			if not State.questWarned then
+				State.questWarned = true
+				notify("Quest menu not found", Config.bad)
+			end
+		else
+			State.questWarned = false
+
+			-- Every few passes press every visible claim in case the bar check misses.
+			local force = pass % 5 == 0
+			local claimed = 0
+
+			for _, filter in ipairs({ "Weekly", "Daily" }) do
+				if not State.autoQuest then
+					break
+				end
+
+				selectQuestFilter(filter)
+				claimed = claimed + claimVisibleQuests(force)
+			end
+
+			if claimed > 0 then
+				notify(string.format("Claimed %d quest(s)", claimed), Config.good)
+			end
+		end
+
+		task.wait(jitter(QUEST_INTERVAL))
+	end
+end
+
+local function startQuest()
+	if State.questThread then
+		return
+	end
+
+	State.autoQuest = true
+	State.questThread = task.spawn(questLoop)
+end
+
+local function stopQuest()
+	State.autoQuest = false
+
+	if State.questThread then
+		pcall(task.cancel, State.questThread)
+		State.questThread = nil
 	end
 end
 
@@ -1389,13 +1593,21 @@ local function buildHomePage(page)
 	})
 	shadeGradient.Parent = gameShade
 
-	local gameNameLabel = makeLabel(gameCard, "Loading...", UDim2.new(1, -28, 0, 18), UDim2.new(0, 14, 0, 10), Config.fontBold, 14, Config.text)
+	-- Small game icon on the left.
+	local smallIcon = makeIcon(gameCard, gameThumb, UDim2.new(0, 56, 0, 56), UDim2.new(0, 10, 0.5, -28), WHITE)
+	smallIcon.ScaleType = Enum.ScaleType.Crop
+	smallIcon.ZIndex = 7
+	createCorner(smallIcon, 10)
+	createStroke(smallIcon, 1, 0.5)
+
+	local gameNameLabel = makeLabel(gameCard, "Loading...", UDim2.new(1, -90, 0, 18), UDim2.new(0, 76, 0, 10), Config.fontBold, 14, Config.text)
 	gameNameLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
-	local placeLabel = makeLabel(gameCard, "Place ID  " .. game.PlaceId, UDim2.new(1, -28, 0, 12), UDim2.new(0, 14, 0, 32), Config.fontMedium, 10, Config.textDim)
+	local placeLabel = makeLabel(gameCard, "Place ID  " .. game.PlaceId, UDim2.new(1, -90, 0, 12), UDim2.new(0, 76, 0, 32), Config.fontMedium, 10, Config.textDim)
 
-	makeIcon(gameCard, Icons.Users, UDim2.new(0, 12, 0, 12), UDim2.new(0, 14, 0, 51), Config.good)
-	local playersLabel = makeLabel(gameCard, "", UDim2.new(1, -50, 0, 12), UDim2.new(0, 32, 0, 51), Config.fontMedium, 10, Config.good)
+	local usersIcon = makeIcon(gameCard, Icons.Users, UDim2.new(0, 12, 0, 12), UDim2.new(0, 76, 0, 51), Config.good)
+	usersIcon.ZIndex = 7
+	local playersLabel = makeLabel(gameCard, "", UDim2.new(1, -110, 0, 12), UDim2.new(0, 94, 0, 51), Config.fontMedium, 10, Config.good)
 
 	-- Keep the text above the shade and easy to read.
 	for _, label in ipairs({ gameNameLabel, placeLabel, playersLabel }) do
@@ -1422,7 +1634,9 @@ local function buildHomePage(page)
 
 		local iconId = tonumber(info.IconImageAssetId)
 		if iconId and iconId > 0 then
-			gameIcon.Image = getIcon("rbxassetid://" .. iconId)
+			local assetUrl = getIcon("rbxassetid://" .. iconId)
+			gameIcon.Image = assetUrl
+			smallIcon.Image = assetUrl
 		end
 	end)
 
@@ -1991,6 +2205,20 @@ local function buildUI()
 		Config.accentLight
 	)
 
+	-- Quest card.
+	local questCard = makeCard(mainPage, UDim2.new(1, -36, 0, 46), UDim2.new(0, 18, 0, 354))
+
+	uiRefs.quest = makeToggle(questCard, 3, "Auto Claim Quests", State.autoQuest, function(value)
+		if value then
+			startQuest()
+		else
+			stopQuest()
+		end
+
+		uiRefs.quest.set(State.autoQuest)
+		saveConfig()
+	end, Icons.Check)
+
 	-- Settings page.
 	local settingsHeader = makeCard(settingsPage, UDim2.new(1, -90, 0, 42), UDim2.new(0, 18, 0, 16))
 
@@ -2071,7 +2299,10 @@ local function buildUI()
 	track(copyChip.button.MouseButton1Click:Connect(function()
 		playSound("Click")
 		if setclipboard then
-			setclipboard(sessionLabel.Text .. string.format(" · rolls: %d · collected: %d", State.rolls, State.collected))
+			setclipboard(
+				sessionLabel.Text
+					.. string.format(" · rolls: %d · collected: %d · quests: %d", State.rolls, State.collected, State.questClaimed)
+			)
 			notify("Copied session stats", Config.good)
 		end
 	end))
@@ -2106,7 +2337,7 @@ local function buildUI()
 			local status = remotesReady and (State.running and "RUNNING" or "IDLE") or "NO REMOTES"
 			local color = remotesReady and (State.running and Config.good or Config.muted) or Config.bad
 
-			statusLabel.Text = string.format("💤 · %s · rolls: %d · 💰 %d", status, State.rolls, State.collected)
+			statusLabel.Text = string.format("💤 · %s · rolls: %d · 💰 %d · 📜 %d", status, State.rolls, State.collected, State.questClaimed)
 			dot.BackgroundColor3 = color
 
 			local uptime = formatTime(os.clock() - State.startTime)
@@ -2283,6 +2514,7 @@ local function buildUI()
 		-- Stop first so the saved config does not auto resume next run.
 		pcall(stopDice)
 		pcall(stopCollect)
+		pcall(stopQuest)
 		saveConfig()
 		hideWindow(function()
 			AxionHub.detach()
@@ -2359,6 +2591,7 @@ function AxionHub.detach()
 
 	pcall(stopDice)
 	pcall(stopCollect)
+	pcall(stopQuest)
 
 	if State.lowPower then
 		pcall(applyLowPower, false)
@@ -2446,10 +2679,19 @@ local function initializeScript()
 
 	task.spawn(watchdogLoop)
 
+	-- The toggle is built from the saved value, the loop starts after the ui exists.
+	local resumeQuest = State.autoQuest
+	State.autoQuest = false
+
 	buildUI()
 
 	if State.lowPower then
 		applyLowPower(true)
+	end
+
+	if resumeQuest then
+		startQuest()
+		uiRefs.quest.set(true)
 	end
 
 	-- Pick the work back up after a rejoin.
