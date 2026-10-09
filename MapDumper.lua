@@ -1,918 +1,1344 @@
--- ============================================================
---  MapDumper.lua  |  Delta Executor
---  dump: workspace + ReplicatedStorage (จำกัดความลึก)
---  รูปแบบ: JSON / TXT  |  ตั้งชื่อไฟล์ได้ (ว่าง = ใช้ชื่อ map อัตโนมัติ)
--- ============================================================
+--!nolint
+--!nocheck
 
-warn("[MapDumper] script started")
+-- Xexer Dump: Complete Edition (Localized & Remote Spy)
 
-local HttpService       = game:GetService("HttpService")
-local UserInputService  = game:GetService("UserInputService")
-local TweenService      = game:GetService("TweenService")
-local CollectionService = game:GetService("CollectionService")
-local Players           = game:GetService("Players")
+local __ok, __err = pcall(function()
+local Players = game:GetService("Players")
+local LP = Players.LocalPlayer or Players.PlayerAdded:Wait()
 
--- ────────────────── CONFIG ──────────────────
-local CONFIG = {
-    DefaultFileName        = "",        -- ว่าง = ใช้ชื่อ map อัตโนมัติ
-    DefaultFormat          = "json",    -- "json" หรือ "txt"
-    DumpWorkspace          = true,
-    DumpReplicatedStorage  = true,
-    DumpPlayers            = false,
-    MaxDepth               = 8,
-    MaxNodes               = 200000,
-    IncludeScripts         = false,
-    IncludeAttributes      = true,
-    IncludeTags            = true,
-    IncludeDescendantCount = false,
-    SkipClasses = {
-        Terrain = true,
-        Camera  = true,
-    },
+-- Clean up only this script's previous UI.
+pcall(function()
+    local roots = {}
+    if LP:FindFirstChildOfClass("PlayerGui") then table.insert(roots, LP:FindFirstChildOfClass("PlayerGui")) end
+    pcall(function() if gethui then table.insert(roots, gethui()) end end)
+    for _, root in ipairs(roots) do
+        for _, item in ipairs(root:GetChildren()) do
+            if item.Name == "AxionHub_XexerDump" or item.Name == "XexerDump_OpenButton" then
+                pcall(function() item:Destroy() end)
+            end
+        end
+    end
+end)
+
+-- AxionHub-style UI adapter.
+-- It intentionally implements the small WindUI-compatible surface used below,
+-- so the existing tabs and callbacks can use the AxionHub visual style without
+-- downloading a third-party UI library at runtime.
+local AxionUI = {}
+local AxionPalette = {
+    bgTop = Color3.fromRGB(19, 21, 35),
+    bgBottom = Color3.fromRGB(10, 11, 19),
+    panelTop = Color3.fromRGB(29, 31, 49),
+    panelBottom = Color3.fromRGB(20, 22, 36),
+    sidebarTop = Color3.fromRGB(17, 19, 32),
+    sidebarBottom = Color3.fromRGB(11, 12, 22),
+    text = Color3.fromRGB(245, 246, 255),
+    muted = Color3.fromRGB(153, 158, 184),
+    accentBlue = Color3.fromRGB(93, 117, 255),
+    accentPink = Color3.fromRGB(222, 92, 210),
+    success = Color3.fromRGB(94, 224, 164),
+    danger = Color3.fromRGB(255, 103, 126),
+    track = Color3.fromRGB(48, 51, 73),
 }
+local AxionGui, AxionWindow, AxionContent, AxionSidebar, AxionTabButtons
+local AxionTabs = {}
+local AxionSelectedTab
+local AxionToastToken = 0
+local AxionOpenButton
 
--- ────────────────── HELPERS ──────────────────
-local function isFiniteNumber(n)
-    return type(n) == "number" and n == n and n ~= math.huge and n ~= -math.huge
+local function axionCorner(parent, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius or 10)
+    c.Parent = parent
+    return c
 end
 
-local function round3(n)
-    if not isFiniteNumber(n) then return 0 end
-    return math.floor(n * 1000 + 0.5) / 1000
+local function axionGradient(parent, rotation, first, second)
+    local g = Instance.new("UIGradient")
+    g.Rotation = rotation or 0
+    g.Color = ColorSequence.new(first or AxionPalette.accentBlue, second or AxionPalette.accentPink)
+    g.Parent = parent
+    return g
 end
 
--- sanitize ชื่อไฟล์: ตัดอักขระต้องห้ามของ filesystem
-local function sanitizeFileName(name)
-    if type(name) ~= "string" then return nil end
-    name = name:gsub("^%s+", ""):gsub("%s+$", "")
-    if name == "" then return nil end
-    -- ตัดอักขระต้องห้าม: \ / : * ? " < > | และควบคุม
-    name = name:gsub('[\\/:*?"<>|]', "_")
-    name = name:gsub("%c", "")
-    name = name:gsub("%.%.", "_")        -- กัน path traversal
-    if #name > 100 then name = name:sub(1, 100) end
-    if name == "" then return nil end
-    return name
+local function axionStroke(parent, transparency)
+    local s = Instance.new("UIStroke")
+    s.Thickness = 1
+    s.Transparency = transparency or 0.45
+    s.Color = AxionPalette.accentBlue
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    s.Parent = parent
+    axionGradient(s, 0, AxionPalette.accentBlue, AxionPalette.accentPink)
+    return s
 end
 
--- ดึงชื่อ map จาก DataModel แล้ว sanitize
-local function getMapName()
-    local raw = game:GetService("MarketplaceService")
-    -- พยายามดึงชื่อเกมจริงก่อน
-    local okName, info = pcall(function()
-        return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+local function axionLabel(parent, text, size, position, textSize, color, font, xAlign)
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.BorderSizePixel = 0
+    label.Size = size
+    label.Position = position
+    label.Text = tostring(text or "")
+    label.TextSize = textSize or 12
+    label.TextColor3 = color or AxionPalette.text
+    label.Font = font or Enum.Font.Gotham
+    label.TextXAlignment = xAlign or Enum.TextXAlignment.Left
+    label.TextYAlignment = Enum.TextYAlignment.Center
+    label.TextWrapped = true
+    label.ZIndex = (parent.ZIndex or 1) + 1
+    label.Parent = parent
+    return label
+end
+
+local function axionParent()
+    local ok, parent = pcall(function()
+        if gethui then return gethui() end
+        return LP:WaitForChild("PlayerGui")
     end)
-    if okName and info and info.Name and info.Name ~= "" then
-        return sanitizeFileName(info.Name) or ("Map_" .. tostring(game.PlaceId))
-    end
-    -- fallback: ใช้ชื่อ place file ปัจจุบัน
-    local okFile, fileName = pcall(function()
-        return game:GetService("Players").LocalPlayer and game.PlaceId
-    end)
-    if okFile and fileName then
-        return "Map_" .. tostring(fileName)
-    end
-    return "MapDump"
+    if ok and parent then return parent end
+    return LP:WaitForChild("PlayerGui")
 end
 
-local function safeGet(inst, prop)
-    local ok, val = pcall(function() return inst[prop] end)
-    if not ok then return nil end
-    local t = typeof(val)
-    if t == "Vector3" then
-        return { x = round3(val.X), y = round3(val.Y), z = round3(val.Z) }
-    elseif t == "Vector2" then
-        return { x = round3(val.X), y = round3(val.Y) }
-    elseif t == "CFrame" then
-        local p = val.Position
-        local rx, ry, rz = val:ToEulerAnglesXYZ()
-        return {
-            pos = { x = round3(p.X), y = round3(p.Y), z = round3(p.Z) },
-            rot = { x = round3(math.deg(rx)), y = round3(math.deg(ry)), z = round3(math.deg(rz)) }
-        }
-    elseif t == "Color3" then
-        return { r = round3(val.R), g = round3(val.G), b = round3(val.B) }
-    elseif t == "BrickColor" then return val.Name
-    elseif t == "EnumItem"   then return val.Name
-    elseif t == "Instance"   then
-        local okN, n = pcall(function() return val:GetFullName() end)
-        return okN and n or tostring(val)
-    elseif t == "boolean" or t == "number" or t == "string" then
-        return val
-    else
-        return tostring(val)
-    end
-end
-
--- ────────────────── PROPERTY MAP ──────────────────
-local CLASS_PROPS = {
-    BasePart = {
-        "Position","Orientation","Size","Anchored","CanCollide","CanTouch",
-        "Transparency","Material","BrickColor","Color","CastShadow",
-        "AssemblyLinearVelocity","AssemblyAngularVelocity","Massless","Locked",
-        "LocalTransparencyModifier","CollisionGroupId","RootPriority",
-    },
-    Model          = {"PrimaryPart","WorldPivot"},
-    Humanoid       = {"MaxHealth","Health","WalkSpeed","JumpPower","HipHeight","RigType","DisplayName"},
-    Script         = {"Enabled","RunContext"},
-    LocalScript    = {"Enabled"},
-    RemoteEvent    = {}, RemoteFunction = {}, BindableEvent = {}, BindableFunction = {},
-    StringValue    = {"Value"}, NumberValue = {"Value"}, BoolValue = {"Value"}, IntValue = {"Value"},
-    ObjectValue    = {},
-    Sound          = {"SoundId","Volume","PlaybackSpeed","Playing","Looped"},
-    Animation      = {"AnimationId"},
-    SpecialMesh    = {"MeshType","MeshId","TextureId","Scale","Offset"},
-    Texture        = {"Texture","StudsPerTileU","StudsPerTileV","Face"},
-    Decal          = {"Texture","Face","Transparency"},
-    SurfaceAppearance = {"AlbedoMap","NormalMap","RoughnessMap","MetalnessMap"},
-    WeldConstraint = {"Part0","Part1"}, Motor6D = {"Part0","Part1","C0","C1"},
-    BallSocketConstraint = {"Attachment0","Attachment1"},
-    HingeConstraint = {"Attachment0","Attachment1","LimitsEnabled"},
-    Attachment     = {"WorldPosition","WorldAxis"},
-    Light          = {"Brightness","Color","Enabled","Range"},
-    SpotLight      = {"Brightness","Color","Enabled","Range","Angle","Face"},
-    PointLight     = {"Brightness","Color","Enabled","Range"},
-    SurfaceLight   = {"Brightness","Color","Enabled","Range","Face"},
-    Smoke          = {"Enabled","Color","Opacity","RiseVelocity","Size"},
-    Fire           = {"Enabled","Color","SecondaryColor","Heat","Size"},
-    Sparkles       = {"Enabled","SparkleColor"},
-    BillboardGui   = {"Active","AlwaysOnTop","Size","StudsOffset"},
-    ScreenGui      = {"Enabled","DisplayOrder"},
-    Frame          = {"Size","Position","BackgroundColor3","BackgroundTransparency"},
-    TextLabel      = {"Text","TextColor3","TextSize","Font","TextTransparency"},
-    TextButton     = {"Text","TextColor3","TextSize"},
-    ImageLabel     = {"Image","ImageColor3","ImageTransparency"},
-    ImageButton    = {"Image","ImageColor3"},
-}
-
-local function getProps(inst)
-    local result = {}
-    for className, props in pairs(CLASS_PROPS) do
-        local okIsA, isA = pcall(function() return inst:IsA(className) end)
-        if okIsA and isA then
-            for _, p in ipairs(props) do
-                if result[p] == nil then
-                    local v = safeGet(inst, p)
-                    if v ~= nil then result[p] = v end
-                end
-            end
-        end
-    end
-    return result
-end
-
--- ────────────────── DEEP DATA HELPERS ──────────────────
-local function getAttributes(inst)
-    if not CONFIG.IncludeAttributes then return nil end
-    local ok, attrs = pcall(function() return inst:GetAttributes() end)
-    if not ok or not attrs or next(attrs) == nil then return nil end
-
-    local result = {}
-    for name, value in pairs(attrs) do
-        local t = typeof(value)
-        if t == "Vector3" then
-            result[name] = { x = round3(value.X), y = round3(value.Y), z = round3(value.Z) }
-        elseif t == "Vector2" then
-            result[name] = { x = round3(value.X), y = round3(value.Y) }
-        elseif t == "Color3" then
-            result[name] = { r = round3(value.R), g = round3(value.G), b = round3(value.B) }
-        elseif t == "CFrame" then
-            local p = value.Position
-            local rx, ry, rz = value:ToEulerAnglesXYZ()
-            result[name] = {
-                pos = { x = round3(p.X), y = round3(p.Y), z = round3(p.Z) },
-                rot = { x = round3(math.deg(rx)), y = round3(math.deg(ry)), z = round3(math.deg(rz)) }
-            }
-        elseif t == "Instance" then
-            local okN, n = pcall(function() return value:GetFullName() end)
-            result[name] = okN and n or tostring(value)
-        elseif t == "EnumItem" then
-            result[name] = value.Name
-        elseif t == "boolean" or t == "string" then
-            result[name] = value
-        elseif t == "number" then
-            result[name] = isFiniteNumber(value) and value or 0
-        else
-            result[name] = tostring(value)
-        end
-    end
-    return result
-end
-
-local function getTags(inst)
-    if not CONFIG.IncludeTags then return nil end
-    local ok, tags = pcall(function() return CollectionService:GetTags(inst) end)
-    if not ok or not tags or #tags == 0 then return nil end
-    table.sort(tags)
-    return tags
-end
-
--- ────────────────── RECURSIVE DUMP ──────────────────
-local nodeCount = 0
-
-local function dumpInstance(inst, depth)
-    if depth > CONFIG.MaxDepth then return nil end
-    if nodeCount >= CONFIG.MaxNodes then return nil end
-
-    local okCls, cls = pcall(function() return inst.ClassName end)
-    if okCls and CONFIG.SkipClasses[cls] then return nil end
-
-    nodeCount = nodeCount + 1
-
-    local node = {
-        name      = inst.Name,
-        className = cls or "Unknown",
-        fullPath  = inst:GetFullName(),
-    }
-
-    local props = getProps(inst)
-    if next(props) then node.properties = props end
-
-    local attributes = getAttributes(inst)
-    if attributes then node.attributes = attributes end
-
-    local tags = getTags(inst)
-    if tags then node.tags = tags end
-
-    local visibility = {}
-    local transparency = safeGet(inst, "Transparency")
-    local enabled = safeGet(inst, "Enabled")
-    local localTransparency = safeGet(inst, "LocalTransparencyModifier")
-
-    if transparency ~= nil then visibility.transparency = transparency end
-    if enabled ~= nil then visibility.enabled = enabled end
-    if localTransparency ~= nil then
-        visibility.localTransparencyModifier = localTransparency
-    end
-    if next(visibility) then node.visibility = visibility end
-
-    local okCh, children = pcall(function() return inst:GetChildren() end)
-    if okCh and children and #children > 0 then
-        node.children = {}
-        for _, child in ipairs(children) do
-            local okChk, skip = pcall(function()
-                return (not CONFIG.IncludeScripts) and
-                    (child:IsA("Script") or child:IsA("LocalScript") or child:IsA("ModuleScript"))
-            end)
-            if not (okChk and skip) then
-                local childNode = dumpInstance(child, depth + 1)
-                if childNode then table.insert(node.children, childNode) end
-            end
-        end
-        if #node.children == 0 then node.children = nil end
-    end
-
-    return node
-end
-
--- ────────────────── JSON SAFE ENCODE ──────────────────
-local function jsonSafe(value, seen)
-    local valueType = typeof(value)
-
-    if value == nil or valueType == "string" or valueType == "boolean" then
-        return value
-    end
-
-    if valueType == "number" then
-        return isFiniteNumber(value) and value or 0
-    end
-
-    if valueType == "Vector3" then
-        return { x = round3(value.X), y = round3(value.Y), z = round3(value.Z) }
-    elseif valueType == "Vector2" then
-        return { x = round3(value.X), y = round3(value.Y) }
-    elseif valueType == "Color3" then
-        return { r = round3(value.R), g = round3(value.G), b = round3(value.B) }
-    elseif valueType == "CFrame" then
-        local p = value.Position
-        local rx, ry, rz = value:ToEulerAnglesXYZ()
-        return {
-            pos = { x = round3(p.X), y = round3(p.Y), z = round3(p.Z) },
-            rot = { x = round3(math.deg(rx)), y = round3(math.deg(ry)), z = round3(math.deg(rz)) }
-        }
-    elseif valueType == "EnumItem" then
-        return value.Name
-    elseif valueType == "Instance" then
-        local ok, fullName = pcall(function() return value:GetFullName() end)
-        return ok and fullName or tostring(value)
-    end
-
-    if valueType == "table" then
-        seen = seen or {}
-        if seen[value] then return "<circular>" end
-        seen[value] = true
-
-        local result = {}
-        local isArray = true
-        local maxIndex = 0
-        local count = 0
-
-        for k, _ in pairs(value) do
-            count = count + 1
-            if typeof(k) ~= "number" or k < 1 or k % 1 ~= 0 then
-                isArray = false
-            else
-                maxIndex = math.max(maxIndex, k)
-            end
-        end
-        if isArray and maxIndex ~= count then isArray = false end
-
-        if isArray then
-            for i = 1, maxIndex do
-                result[i] = jsonSafe(value[i], seen)
-            end
-        else
-            for k, v in pairs(value) do
-                local keyType = typeof(k)
-                if keyType == "string" or keyType == "number" then
-                    result[tostring(k)] = jsonSafe(v, seen)
-                end
-            end
-        end
-
-        seen[value] = nil
-        return result
-    end
-
-    local ok, str = pcall(function() return tostring(value) end)
-    return ok and str or "<unsupported>"
-end
-
--- ────────────────── TXT ENCODER ──────────────────
--- แปลง node tree เป็น text แบบ indent อ่านง่าย
-local function encodeTxt(node, indent, out)
-    indent = indent or 0
-    out = out or {}
-
-    local pad = string.rep("  ", indent)
-    local header = pad .. "[" .. node.className .. "] " .. node.name
-    table.insert(out, header)
-
-    if node.properties and next(node.properties) then
-        -- เรียง key ให้อ่านง่าย
-        local keys = {}
-        for k, _ in pairs(node.properties) do table.insert(keys, k) end
-        table.sort(keys)
-        for _, k in ipairs(keys) do
-            local v = node.properties[k]
-            local vs
-            if type(v) == "table" then
-                local parts = {}
-                for kk, vv in pairs(v) do
-                    table.insert(parts, tostring(kk) .. "=" .. tostring(vv))
-                end
-                vs = "{" .. table.concat(parts, ", ") .. "}"
-            else
-                vs = tostring(v)
-            end
-            table.insert(out, pad .. "  ." .. k .. " = " .. vs)
-        end
-    end
-
-    if node.attributes then
-        local keys = {}
-        for k, _ in pairs(node.attributes) do table.insert(keys, k) end
-        table.sort(keys)
-        for _, k in ipairs(keys) do
-            local v = node.attributes[k]
-            local vs
-            if type(v) == "table" then
-                local parts = {}
-                for kk, vv in pairs(v) do
-                    table.insert(parts, tostring(kk) .. "=" .. tostring(vv))
-                end
-                vs = "{" .. table.concat(parts, ", ") .. "}"
-            else
-                vs = tostring(v)
-            end
-            table.insert(out, pad .. "  @" .. k .. " = " .. vs)
-        end
-    end
-
-    if node.tags then
-        table.insert(out, pad .. "  #tags = " .. table.concat(node.tags, ", "))
-    end
-
-    if node.visibility then
-        local parts = {}
-        for k, v in pairs(node.visibility) do
-            table.insert(parts, k .. "=" .. tostring(v))
-        end
-        if #parts > 0 then
-            table.insert(out, pad .. "  ~visibility: " .. table.concat(parts, ", "))
-        end
-    end
-
-    if node.children then
-        for _, child in ipairs(node.children) do
-            encodeTxt(child, indent + 1, out)
-        end
-    end
-
-    return out
-end
-
-local function buildTxtOutput(output)
-    local lines = {}
-
-    table.insert(lines, "============================================")
-    table.insert(lines, "  MAP DUMP  |  " .. tostring(output.meta.game))
-    table.insert(lines, "============================================")
-    table.insert(lines, "game:        " .. tostring(output.meta.game))
-    table.insert(lines, "place:       " .. tostring(output.meta.place))
-    table.insert(lines, "version:     " .. tostring(output.meta.version))
-    table.insert(lines, "dumped:      " .. tostring(output.meta.dumped))
-    table.insert(lines, "mode:        " .. tostring(output.meta.mode))
-    table.insert(lines, "totalNodes:  " .. tostring(output.meta.totalNodes or 0))
-    table.insert(lines, "")
-
-    for _, root in ipairs(output.roots or {}) do
-        table.insert(lines, "───────── ROOT: " .. root.name .. " ─────────")
-        encodeTxt(root, 0, lines)
-        table.insert(lines, "")
-    end
-
-    return table.concat(lines, "\n")
-end
-
--- ────────────────── MAIN DUMP ──────────────────
-local function runDump(onProgress, format, userFileName)
-    local startTime = tick()
-    nodeCount = 0
-
-    -- คำนวณชื่อไฟล์: ถ้าผู้ใช้ตั้งไว้ใช้ค่านั้น ไม่งั้นดึงจากชื่อ map
-    local baseName = sanitizeFileName(userFileName)
-    if not baseName then
-        baseName = getMapName()
-    end
-    local ext = (format == "txt") and ".txt" or ".json"
-    local fileName = baseName .. ext
-
-    local output = {
-        meta = {
-            game    = tostring(game.GameId),
-            place   = tostring(game.PlaceId),
-            version = tostring(game.PlaceVersion),
-            dumped  = os.time(),
-            executor = "Delta",
-            mode    = "DeepDump",
-            format  = format,
-            fileName = fileName,
-            includes = {
-                attributes = CONFIG.IncludeAttributes,
-                tags = CONFIG.IncludeTags,
-                descendantCount = CONFIG.IncludeDescendantCount,
-                invisibleState = true,
-            },
-        },
-        roots = {}
-    }
-
-    local targets = {}
-    if CONFIG.DumpWorkspace         then table.insert(targets, workspace) end
-    if CONFIG.DumpReplicatedStorage then table.insert(targets, game:GetService("ReplicatedStorage")) end
-    if CONFIG.DumpPlayers           then table.insert(targets, Players) end
-
-    for i, root in ipairs(targets) do
-        onProgress("กำลัง dump " .. root.Name .. "…", i / #targets * 0.9)
-        task.wait()
-        local ok, node = pcall(dumpInstance, root, 0)
-        if ok and node then table.insert(output.roots, node) end
-    end
-
-    onProgress("กำลังเข้ารหัส…", 0.93)
-    task.wait()
-
-    local elapsed = math.floor((tick() - startTime) * 100 + 0.5) / 100
-    output.meta.dumpTimeSeconds = elapsed
-    output.meta.totalNodes = nodeCount
-
-    local finalStr
-
-    if format == "txt" then
-        -- ── TXT ──
-        local okTxt, txt = pcall(buildTxtOutput, output)
-        if not okTxt then error("สร้าง TXT ล้มเหลว: " .. tostring(txt)) end
-        finalStr = txt
-    else
-        -- ── JSON ──
-        local safeOutput = jsonSafe(output)
-
-        local ok2, jsonStr = pcall(function()
-            return HttpService:JSONEncode(safeOutput)
-        end)
-
-        if not ok2 then
-            local function stripDeep(node)
-                if type(node) ~= "table" then return node end
-                node.attributes = nil
-                node.tags = nil
-                node.descendantCount = nil
-                node.visibility = nil
-                if type(node.children) == "table" then
-                    for _, c in ipairs(node.children) do stripDeep(c) end
-                end
-                return node
-            end
-
-            for _, root in ipairs(safeOutput.roots or {}) do stripDeep(root) end
-            safeOutput.meta.mode = "DeepDump-Fallback"
-
-            local okFallback, fallbackJson = pcall(function()
-                return HttpService:JSONEncode(safeOutput)
-            end)
-
-            if not okFallback then
-                error("ไม่สามารถสร้าง JSON ได้: " .. tostring(fallbackJson))
-            end
-            jsonStr = fallbackJson
-        end
-
-        finalStr = jsonStr
-    end
-
-    onProgress("กำลังบันทึกไฟล์…", 0.97)
-    task.wait()
-
-    local ok3, err = pcall(function() writefile(fileName, finalStr) end)
-    if not ok3 then error("writefile ล้มเหลว: " .. tostring(err)) end
-
-    return elapsed, #finalStr, fileName
-end
-
--- ────────────────── GUI ──────────────────
-local function makeGui()
-    local parentGui
-    local okPG, pg = pcall(function()
-        return Players.LocalPlayer:WaitForChild("PlayerGui", 5)
-    end)
-    if okPG and pg then
-        parentGui = pg
-    else
-        local okCG, cg = pcall(function() return game.CoreGui end)
-        if okCG and cg then
-            parentGui = cg
-        else
-            warn("[MapDumper] หา GUI parent ไม่ได้")
-            return
-        end
-    end
-
-    local old = parentGui:FindFirstChild("MapDumperGui")
-    if old then old:Destroy() end
-
-    local sg = Instance.new("ScreenGui")
-    sg.Name           = "MapDumperGui"
-    sg.ResetOnSpawn   = false
-    sg.IgnoreGuiInset = true
-    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    sg.DisplayOrder   = 999
-    sg.Parent         = parentGui
-
-    -- ── panel (สูงขึ้นเพื่อใส่ช่องชื่อไฟล์ + toggle) ──
-    local W, H = 320, 330
-    local panel = Instance.new("Frame")
-    panel.Size             = UDim2.new(0, W, 0, H)
-    panel.Position         = UDim2.new(0.5, -W/2, 0.5, -H/2)
-    panel.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
-    panel.BorderSizePixel  = 0
-    panel.Parent           = sg
-
-    local panelCorner = Instance.new("UICorner")
-    panelCorner.CornerRadius = UDim.new(0, 14)
-    panelCorner.Parent = panel
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Color     = Color3.fromRGB(60, 90, 180)
-    stroke.Thickness = 1.5
-    stroke.Parent    = panel
-
-    -- ── Title bar ──
-    local titleBar = Instance.new("TextLabel")
-    titleBar.Size             = UDim2.new(1, 0, 0, 40)
-    titleBar.Position         = UDim2.new(0, 0, 0, 0)
-    titleBar.BackgroundColor3 = Color3.fromRGB(25, 25, 36)
-    titleBar.BorderSizePixel  = 0
-    titleBar.Text             = "📦  Map Dumper"
-    titleBar.TextColor3       = Color3.fromRGB(200, 210, 255)
-    titleBar.Font             = Enum.Font.GothamBold
-    titleBar.TextSize         = 15
-    titleBar.ZIndex           = 2
-    titleBar.Parent           = panel
-
-    local titleCorner = Instance.new("UICorner")
-    titleCorner.CornerRadius = UDim.new(0, 14)
-    titleCorner.Parent = titleBar
-
-    local titleFix = Instance.new("Frame")
-    titleFix.Size             = UDim2.new(1, 0, 0, 14)
-    titleFix.Position         = UDim2.new(0, 0, 1, -14)
-    titleFix.BackgroundColor3 = Color3.fromRGB(25, 25, 36)
-    titleFix.BorderSizePixel  = 0
-    titleFix.ZIndex           = 1
-    titleFix.Parent           = titleBar
-
-    -- ── status ──
-    local statusLbl = Instance.new("TextLabel")
-    statusLbl.Size                   = UDim2.new(1, -20, 0, 26)
-    statusLbl.Position               = UDim2.new(0, 10, 0, 46)
-    statusLbl.BackgroundTransparency = 1
-    statusLbl.TextColor3             = Color3.fromRGB(160, 170, 200)
-    statusLbl.Font                   = Enum.Font.Gotham
-    statusLbl.TextSize               = 13
-    statusLbl.TextXAlignment         = Enum.TextXAlignment.Center
-    statusLbl.TextWrapped            = true
-    statusLbl.Text                   = "ตั้งค่าแล้วกด Dump"
-    statusLbl.Parent                 = panel
-
-    -- ── ป้ายกำกับ: ชื่อไฟล์ ──
-    local nameLabel = Instance.new("TextLabel")
-    nameLabel.Size                   = UDim2.new(1, -30, 0, 18)
-    nameLabel.Position               = UDim2.new(0, 15, 0, 78)
-    nameLabel.BackgroundTransparency = 1
-    nameLabel.TextColor3             = Color3.fromRGB(140, 150, 180)
-    nameLabel.Font                   = Enum.Font.GothamMedium
-    nameLabel.TextSize               = 12
-    nameLabel.TextXAlignment         = Enum.TextXAlignment.Left
-    nameLabel.Text                   = "ชื่อไฟล์ (เว้นว่าง = ใช้ชื่อ map)"
-    nameLabel.Parent                 = panel
-
-    -- ── TextBox ชื่อไฟล์ ──
-    local nameBox = Instance.new("TextBox")
-    nameBox.Size             = UDim2.new(1, -30, 0, 34)
-    nameBox.Position         = UDim2.new(0, 15, 0, 98)
-    nameBox.BackgroundColor3 = Color3.fromRGB(30, 30, 44)
-    nameBox.BorderSizePixel  = 0
-    nameBox.TextColor3       = Color3.fromRGB(230, 235, 255)
-    nameBox.PlaceholderText  = "(อัตโนมัติจากชื่อ map)"
-    nameBox.PlaceholderColor3 = Color3.fromRGB(90, 100, 130)
-    nameBox.Font             = Enum.Font.Gotham
-    nameBox.TextSize         = 13
-    nameBox.Text             = CONFIG.DefaultFileName
-    nameBox.ClearTextOnFocus = false
-    nameBox.TextXAlignment   = Enum.TextXAlignment.Left
-    nameBox.Parent           = panel
-
-    local nameBoxCorner = Instance.new("UICorner")
-    nameBoxCorner.CornerRadius = UDim.new(0, 8)
-    nameBoxCorner.Parent = nameBox
-
-    local nameBoxPad = Instance.new("UIPadding")
-    nameBoxPad.PaddingLeft   = UDim.new(0, 8)
-    nameBoxPad.PaddingRight  = UDim.new(0, 8)
-    nameBoxPad.Parent = nameBox
-
-    -- ── ป้ายกำกับ: รูปแบบ ──
-    local fmtLabel = Instance.new("TextLabel")
-    fmtLabel.Size                   = UDim2.new(1, -30, 0, 18)
-    fmtLabel.Position               = UDim2.new(0, 15, 0, 142)
-    fmtLabel.BackgroundTransparency = 1
-    fmtLabel.TextColor3             = Color3.fromRGB(140, 150, 180)
-    fmtLabel.Font                   = Enum.Font.GothamMedium
-    fmtLabel.TextSize               = 12
-    fmtLabel.TextXAlignment         = Enum.TextXAlignment.Left
-    fmtLabel.Text                   = "รูปแบบไฟล์"
-    fmtLabel.Parent                 = panel
-
-    -- ── format selector (JSON / TXT) ──
-    local fmtHolder = Instance.new("Frame")
-    fmtHolder.Size             = UDim2.new(1, -30, 0, 38)
-    fmtHolder.Position         = UDim2.new(0, 15, 0, 162)
-    fmtHolder.BackgroundColor3 = Color3.fromRGB(30, 30, 44)
-    fmtHolder.BorderSizePixel  = 0
-    fmtHolder.Parent           = panel
-
-    local fmtHolderCorner = Instance.new("UICorner")
-    fmtHolderCorner.CornerRadius = UDim.new(0, 8)
-    fmtHolderCorner.Parent = fmtHolder
-
-    local fmtPadding = Instance.new("UIPadding")
-    fmtPadding.PaddingTop    = UDim.new(0, 4)
-    fmtPadding.PaddingBottom = UDim.new(0, 4)
-    fmtPadding.PaddingLeft   = UDim.new(0, 4)
-    fmtPadding.PaddingRight  = UDim.new(0, 4)
-    fmtPadding.Parent = fmtHolder
-
-    local fmtLayout = Instance.new("UIListLayout")
-    fmtLayout.FillDirection     = Enum.FillDirection.Horizontal
-    fmtLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    fmtLayout.VerticalAlignment   = Enum.VerticalAlignment.Center
-    fmtLayout.Padding           = UDim.new(0, 4)
-    fmtLayout.Parent = fmtHolder
-
-    local currentFormat = CONFIG.DefaultFormat
-
-    local function makeFormatButton(text, value)
-        local b = Instance.new("TextButton")
-        b.Size             = UDim2.new(0, 140, 1, 0)
-        b.BackgroundColor3 = (value == currentFormat)
-            and Color3.fromRGB(40, 110, 255)
-            or Color3.fromRGB(45, 45, 60)
-        b.TextColor3       = Color3.fromRGB(255, 255, 255)
-        b.Font             = Enum.Font.GothamBold
-        b.TextSize         = 13
-        b.Text             = text
-        b.AutoButtonColor  = false
-        b.Parent           = fmtHolder
-
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0, 6)
-        c.Parent = b
-
-        b.MouseButton1Click:Connect(function()
-            currentFormat = value
-            for _, sib in ipairs(fmtHolder:GetChildren()) do
-                if sib:IsA("TextButton") then
-                    sib.BackgroundColor3 = (sib == b)
-                        and Color3.fromRGB(40, 110, 255)
-                        or Color3.fromRGB(45, 45, 60)
-                end
-            end
-        end)
-
-        return b
-    end
-
-    makeFormatButton("JSON", "json")
-    makeFormatButton("TXT",  "txt")
-
-    -- ── progress bar ──
-    local barBg = Instance.new("Frame")
-    barBg.Size             = UDim2.new(1, -30, 0, 10)
-    barBg.Position         = UDim2.new(0, 15, 0, 212)
-    barBg.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
-    barBg.BorderSizePixel  = 0
-    barBg.Parent           = panel
-
-    local barBgCorner = Instance.new("UICorner")
-    barBgCorner.CornerRadius = UDim.new(0, 5)
-    barBgCorner.Parent = barBg
-
-    local barFill = Instance.new("Frame")
-    barFill.Size             = UDim2.new(0, 0, 1, 0)
-    barFill.BackgroundColor3 = Color3.fromRGB(50, 130, 255)
-    barFill.BorderSizePixel  = 0
-    barFill.Parent           = barBg
-
-    local barFillCorner = Instance.new("UICorner")
-    barFillCorner.CornerRadius = UDim.new(0, 5)
-    barFillCorner.Parent = barFill
-
-    -- ── ปุ่ม Dump ──
-    local btn = Instance.new("TextButton")
-    btn.Size             = UDim2.new(1, -30, 0, 44)
-    btn.Position         = UDim2.new(0, 15, 0, 234)
-    btn.BackgroundColor3 = Color3.fromRGB(40, 110, 255)
-    btn.TextColor3       = Color3.fromRGB(255, 255, 255)
-    btn.Font             = Enum.Font.GothamBold
-    btn.TextSize         = 15
-    btn.Text             = "🚀  เริ่ม Dump Map"
-    btn.AutoButtonColor  = false
-    btn.Parent           = panel
-
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 10)
-    btnCorner.Parent = btn
-
-    btn.MouseEnter:Connect(function()
-        if btn.Active then
-            TweenService:Create(btn, TweenInfo.new(0.15), {
-                BackgroundColor3 = Color3.fromRGB(60, 140, 255)
-            }):Play()
-        end
-    end)
-    btn.MouseLeave:Connect(function()
-        if btn.Active then
-            TweenService:Create(btn, TweenInfo.new(0.15), {
-                BackgroundColor3 = Color3.fromRGB(40, 110, 255)
-            }):Play()
-        end
-    end)
-
-    -- ── info ──
-    local infoLbl = Instance.new("TextLabel")
-    infoLbl.Size                   = UDim2.new(1, -20, 0, 22)
-    infoLbl.Position               = UDim2.new(0, 10, 0, 284)
-    infoLbl.BackgroundTransparency = 1
-    infoLbl.TextColor3             = Color3.fromRGB(90, 100, 130)
-    infoLbl.Font                   = Enum.Font.Gotham
-    infoLbl.TextSize               = 12
-    infoLbl.TextXAlignment         = Enum.TextXAlignment.Center
-    infoLbl.TextWrapped            = true
-    infoLbl.Text                   = ""
-    infoLbl.Parent                 = panel
-
-    -- ── Drag ──
-    local dragging, dragStart, startPos = false, nil, nil
-
-    titleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            dragging  = true
+local function axionMakeDraggable(handle, target)
+    local UIS = game:GetService("UserInputService")
+    local dragging, dragInput, dragStart, startPos
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
             dragStart = input.Position
-            startPos  = panel.Position
+            startPos = target.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
         end
     end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if not dragging then return end
-        if input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch then
+    handle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if dragging and (input == dragInput or input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = input.Position - dragStart
-            panel.Position = UDim2.new(
-                startPos.X.Scale,
-                startPos.X.Offset + delta.X,
-                startPos.Y.Scale,
-                startPos.Y.Offset + delta.Y
+            target.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
             )
         end
     end)
+end
 
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
+local function axionNotify(title, content, icon, duration)
+    if not AxionGui or not AxionGui.Parent then
+        warn(("[Xexer Dump] %s: %s"):format(tostring(title), tostring(content)))
+        return
+    end
+    AxionToastToken += 1
+    local token = AxionToastToken
+    local old = AxionGui:FindFirstChild("AxionToast")
+    if old then old:Destroy() end
+
+    local toast = Instance.new("Frame")
+    toast.Name = "AxionToast"
+    toast.AnchorPoint = Vector2.new(1, 0)
+    toast.Position = UDim2.new(1, -16, 0, 16)
+    toast.Size = UDim2.new(0, 270, 0, 66)
+    toast.BackgroundColor3 = AxionPalette.panelTop
+    toast.BorderSizePixel = 0
+    toast.ZIndex = 80
+    toast.Parent = AxionGui
+    axionCorner(toast, 12)
+    axionStroke(toast, 0.2)
+
+    local stripe = Instance.new("Frame")
+    stripe.Size = UDim2.new(0, 4, 1, -16)
+    stripe.Position = UDim2.new(0, 7, 0, 8)
+    stripe.BackgroundColor3 = AxionPalette.accentBlue
+    stripe.BorderSizePixel = 0
+    stripe.ZIndex = 81
+    stripe.Parent = toast
+    axionCorner(stripe, 99)
+    axionGradient(stripe, 90)
+
+    axionLabel(toast, title or "Xexer Dump", UDim2.new(1, -30, 0, 22), UDim2.new(0, 20, 0, 7), 12, AxionPalette.text, Enum.Font.GothamBold)
+    local desc = axionLabel(toast, content or "", UDim2.new(1, -30, 0, 30), UDim2.new(0, 20, 0, 29), 10, AxionPalette.muted)
+    desc.TextYAlignment = Enum.TextYAlignment.Top
+
+    task.delay(tonumber(duration) or 3, function()
+        if token == AxionToastToken and toast.Parent then toast:Destroy() end
     end)
+end
 
-    -- ── close ──
-    local function closePanel()
-        TweenService:Create(panel, TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
-            Position = UDim2.new(panel.Position.X.Scale, panel.Position.X.Offset,
-                                 panel.Position.Y.Scale, panel.Position.Y.Offset - 40),
-            BackgroundTransparency = 1,
-        }):Play()
+function AxionUI:AddTheme(_theme)
+    -- The palette above is the built-in AxionHub-style theme.
+end
 
-        for _, child in ipairs(panel:GetDescendants()) do
-            if child:IsA("GuiObject") then
-                TweenService:Create(child, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
-            end
-            if child:IsA("TextLabel") or child:IsA("TextButton") or child:IsA("TextBox") then
-                TweenService:Create(child, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
-            end
-        end
+function AxionUI:Notify(options)
+    options = options or {}
+    axionNotify(options.Title or "Xexer Dump", options.Content or "", options.Icon, options.Duration)
+end
 
-        task.delay(0.6, function() sg:Destroy() end)
+function AxionUI:CreateWindow(options)
+    options = options or {}
+    local playerGui = axionParent()
+
+    AxionGui = Instance.new("ScreenGui")
+    AxionGui.Name = "AxionHub_XexerDump"
+    AxionGui.ResetOnSpawn = false
+    AxionGui.IgnoreGuiInset = true
+    AxionGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    AxionGui.DisplayOrder = 999
+    AxionGui.Parent = playerGui
+
+    AxionWindow = Instance.new("Frame")
+    AxionWindow.Name = "MainWindow"
+    AxionWindow.Size = options.Size or UDim2.fromOffset(660, 500)
+    AxionWindow.AnchorPoint = Vector2.new(0.5, 0.5)
+    AxionWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
+    AxionWindow.BackgroundColor3 = AxionPalette.bgBottom
+    AxionWindow.BackgroundTransparency = 0.04
+    AxionWindow.BorderSizePixel = 0
+    AxionWindow.ClipsDescendants = true
+    AxionWindow.ZIndex = 2
+    AxionWindow.Parent = AxionGui
+    axionCorner(AxionWindow, 16)
+    axionGradient(AxionWindow, 115, AxionPalette.bgTop, AxionPalette.bgBottom)
+    axionStroke(AxionWindow, 0.18)
+
+    local scale = Instance.new("UIScale")
+    scale.Parent = AxionWindow
+    local function updateScale()
+        local camera = workspace.CurrentCamera
+        local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+        scale.Scale = math.clamp(math.min((viewport.X * 0.94) / 660, (viewport.Y * 0.9) / 500, 1), 0.48, 1)
+    end
+    updateScale()
+    if workspace.CurrentCamera then
+        workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
     end
 
-    -- ── Dump ──
-    local busy = false
-    btn.MouseButton1Click:Connect(function()
-        if busy then return end
-        busy = true
-        btn.Active = false
+    local topbar = Instance.new("Frame")
+    topbar.Name = "Topbar"
+    topbar.Size = UDim2.new(1, 0, 0, 54)
+    topbar.BackgroundColor3 = AxionPalette.panelTop
+    topbar.BackgroundTransparency = 0.12
+    topbar.BorderSizePixel = 0
+    topbar.ZIndex = 4
+    topbar.Parent = AxionWindow
+    axionGradient(topbar, 0, AxionPalette.panelTop, AxionPalette.bgTop)
+    axionMakeDraggable(topbar, AxionWindow)
 
-        local chosenFormat = currentFormat
-        local typedName    = nameBox.Text
+    local accent = Instance.new("Frame")
+    accent.Size = UDim2.new(1, 0, 0, 2)
+    accent.BackgroundColor3 = AxionPalette.accentBlue
+    accent.BorderSizePixel = 0
+    accent.ZIndex = 5
+    accent.Parent = topbar
+    axionGradient(accent, 0)
 
-        local function onProgress(msg, pct)
-            statusLbl.Text = msg
-            TweenService:Create(barFill, TweenInfo.new(0.2), {
-                Size = UDim2.new(math.clamp(pct, 0, 1), 0, 1, 0)
-            }):Play()
-            barFill.BackgroundColor3 = Color3.fromRGB(50, 130, 255)
+    local logo = Instance.new("ImageLabel")
+    logo.BackgroundTransparency = 1
+    logo.Size = UDim2.fromOffset(30, 30)
+    logo.Position = UDim2.new(0, 15, 0.5, -15)
+    logo.Image = tostring(options.Icon or "rbxassetid://10709819149")
+    logo.ScaleType = Enum.ScaleType.Fit
+    logo.ZIndex = 6
+    logo.Parent = topbar
+
+    axionLabel(topbar, options.Title or "Xexer Dump", UDim2.new(0, 250, 0, 20), UDim2.new(0, 54, 0, 8), 14, AxionPalette.text, Enum.Font.GothamBold)
+    axionLabel(topbar, options.Author or "AxionHub UI", UDim2.new(0, 250, 0, 16), UDim2.new(0, 54, 0, 28), 10, AxionPalette.muted, Enum.Font.Gotham)
+
+    local minimize = Instance.new("TextButton")
+    minimize.Name = "Minimize"
+    minimize.Size = UDim2.fromOffset(30, 30)
+    minimize.Position = UDim2.new(1, -42, 0, 12)
+    minimize.BackgroundColor3 = AxionPalette.track
+    minimize.Text = "—"
+    minimize.TextSize = 16
+    minimize.TextColor3 = AxionPalette.text
+    minimize.Font = Enum.Font.GothamBold
+    minimize.AutoButtonColor = true
+    minimize.ZIndex = 6
+    minimize.Parent = topbar
+    axionCorner(minimize, 9)
+
+    AxionSidebar = Instance.new("Frame")
+    AxionSidebar.Name = "Sidebar"
+    AxionSidebar.Size = UDim2.new(0, 166, 1, -54)
+    AxionSidebar.Position = UDim2.new(0, 0, 0, 54)
+    AxionSidebar.BackgroundColor3 = AxionPalette.sidebarBottom
+    AxionSidebar.BorderSizePixel = 0
+    AxionSidebar.ZIndex = 3
+    AxionSidebar.Parent = AxionWindow
+    axionGradient(AxionSidebar, 90, AxionPalette.sidebarTop, AxionPalette.sidebarBottom)
+
+    axionLabel(AxionSidebar, "AXIONHUB", UDim2.new(1, -24, 0, 18), UDim2.new(0, 14, 0, 14), 10, AxionPalette.accentPink, Enum.Font.GothamBold)
+    axionLabel(AxionSidebar, "DUMP TOOLKIT", UDim2.new(1, -24, 0, 16), UDim2.new(0, 14, 0, 33), 9, AxionPalette.muted, Enum.Font.Gotham)
+
+    AxionContent = Instance.new("Frame")
+    AxionContent.Name = "Content"
+    AxionContent.Size = UDim2.new(1, -166, 1, -54)
+    AxionContent.Position = UDim2.new(0, 166, 0, 54)
+    AxionContent.BackgroundTransparency = 1
+    AxionContent.BorderSizePixel = 0
+    AxionContent.ZIndex = 3
+    AxionContent.Parent = AxionWindow
+
+    AxionTabButtons = {}
+    AxionTabs = {}
+    AxionSelectedTab = nil
+
+    local function selectTab(tab)
+        if not tab or not tab.page then return end
+        AxionSelectedTab = tab
+        for _, candidate in ipairs(AxionTabs) do
+            candidate.page.Visible = candidate == tab
+            candidate.button.BackgroundTransparency = candidate == tab and 0.08 or 1
+            candidate.button.TextColor3 = candidate == tab and AxionPalette.text or AxionPalette.muted
+            local bar = candidate.button:FindFirstChild("ActiveBar")
+            if bar then bar.Visible = candidate == tab end
         end
+    end
 
-        btn.Text             = "⏳  กำลัง dump…"
-        btn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-
-        task.spawn(function()
-            local ok, a, b, fname = pcall(runDump, onProgress, chosenFormat, typedName)
-            if ok then
-                barFill.BackgroundColor3 = Color3.fromRGB(40, 200, 110)
-                TweenService:Create(barFill, TweenInfo.new(0.3), {
-                    Size = UDim2.new(1, 0, 1, 0)
-                }):Play()
-
-                statusLbl.Text       = "✅  dump สำเร็จ!"
-                statusLbl.TextColor3 = Color3.fromRGB(100, 230, 150)
-                infoLbl.Text         = string.format("%.2f วินาที • %s\n→ %s",
-                    a, (b >= 1048576 and string.format("%.2f MB", b/1048576)
-                        or string.format("%.1f KB", b/1024)),
-                    tostring(fname))
-                btn.Text             = "✅  เสร็จแล้ว"
-                btn.BackgroundColor3 = Color3.fromRGB(30, 170, 80)
-
-                warn(string.format("[MapDumper] ✅ บันทึกสำเร็จ → %s (%.2f วินาที, %.1f KB)",
-                    tostring(fname), a, b/1024))
-
-                task.wait(2)
-                closePanel()
-            else
-                barFill.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
-                statusLbl.Text       = "❌  " .. tostring(a):sub(1, 70)
-                statusLbl.TextColor3 = Color3.fromRGB(255, 120, 120)
-                btn.Text             = "🔄  ลองใหม่"
-                btn.BackgroundColor3 = Color3.fromRGB(40, 110, 255)
-                btn.Active           = true
-                busy                 = false
-                warn("[MapDumper] Error:", a)
-            end
+    local Window = {}
+    function Window:EditOpenButton(openOptions)
+        openOptions = openOptions or {}
+        if AxionOpenButton then pcall(function() AxionOpenButton:Destroy() end) end
+        AxionOpenButton = Instance.new("TextButton")
+        AxionOpenButton.Name = "XexerDump_OpenButton"
+        AxionOpenButton.Size = UDim2.fromOffset(48, 48)
+        AxionOpenButton.Position = UDim2.new(0, 20, 0.35, 0)
+        AxionOpenButton.BackgroundColor3 = AxionPalette.panelTop
+        AxionOpenButton.Text = "X"
+        AxionOpenButton.TextColor3 = AxionPalette.text
+        AxionOpenButton.TextSize = 15
+        AxionOpenButton.Font = Enum.Font.GothamBold
+        AxionOpenButton.AutoButtonColor = true
+        AxionOpenButton.Active = true
+        AxionOpenButton.Draggable = true
+        AxionOpenButton.ZIndex = 100
+        AxionOpenButton.Parent = playerGui
+        axionCorner(AxionOpenButton, 14)
+        axionStroke(AxionOpenButton, 0.15)
+        AxionOpenButton.MouseButton1Click:Connect(function()
+            AxionWindow.Visible = not AxionWindow.Visible
         end)
+    end
+    function Window:Tag(_tag) end
+    function Window:SetBackgroundTransparency(value)
+        AxionWindow.BackgroundTransparency = tonumber(value) or 0
+    end
+    function Window:SelectTab(tab)
+        selectTab(tab)
+    end
+    function Window:Tab(tabOptions)
+        tabOptions = tabOptions or {}
+        local tab = { title = tabOptions.Title or "Tab", sections = {} }
+        local index = #AxionTabs + 1
+        local button = Instance.new("TextButton")
+        button.Name = "Tab_" .. tostring(index)
+        button.Size = UDim2.new(1, -16, 0, 38)
+        button.Position = UDim2.new(0, 8, 0, 62 + (index - 1) * 44)
+        button.BackgroundColor3 = AxionPalette.panelTop
+        button.BackgroundTransparency = 1
+        button.BorderSizePixel = 0
+        button.Text = "   " .. tostring(tab.title)
+        button.TextSize = 11
+        button.TextColor3 = AxionPalette.muted
+        button.TextXAlignment = Enum.TextXAlignment.Left
+        button.Font = Enum.Font.GothamMedium
+        button.AutoButtonColor = false
+        button.ZIndex = 5
+        button.Parent = AxionSidebar
+        axionCorner(button, 10)
+
+        local activeBar = Instance.new("Frame")
+        activeBar.Name = "ActiveBar"
+        activeBar.Size = UDim2.new(0, 3, 1, -12)
+        activeBar.Position = UDim2.new(0, 0, 0, 6)
+        activeBar.BackgroundColor3 = AxionPalette.accentBlue
+        activeBar.BorderSizePixel = 0
+        activeBar.Visible = false
+        activeBar.ZIndex = 6
+        activeBar.Parent = button
+        axionCorner(activeBar, 99)
+        axionGradient(activeBar, 90)
+
+        local page = Instance.new("ScrollingFrame")
+        page.Name = "Page_" .. tostring(index)
+        page.Size = UDim2.new(1, -22, 1, -18)
+        page.Position = UDim2.new(0, 11, 0, 9)
+        page.BackgroundTransparency = 1
+        page.BorderSizePixel = 0
+        page.ScrollBarThickness = 3
+        page.ScrollBarImageColor3 = AxionPalette.accentBlue
+        page.CanvasSize = UDim2.new(0, 0, 0, 0)
+        page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        page.Visible = false
+        page.ZIndex = 4
+        page.Parent = AxionContent
+        local layout = Instance.new("UIListLayout")
+        layout.Padding = UDim.new(0, 10)
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Parent = page
+        local padding = Instance.new("UIPadding")
+        padding.PaddingBottom = UDim.new(0, 12)
+        padding.PaddingRight = UDim.new(0, 3)
+        padding.Parent = page
+
+        tab.button, tab.page = button, page
+        table.insert(AxionTabs, tab)
+        button.MouseButton1Click:Connect(function() selectTab(tab) end)
+        if not AxionSelectedTab then selectTab(tab) end
+
+        function tab:Section(sectionOptions)
+            sectionOptions = sectionOptions or {}
+            local section = {}
+            local card = Instance.new("Frame")
+            card.Name = "Section"
+            card.Size = UDim2.new(1, -4, 0, 52)
+            card.AutomaticSize = Enum.AutomaticSize.Y
+            card.BackgroundColor3 = AxionPalette.panelTop
+            card.BackgroundTransparency = 0.12
+            card.BorderSizePixel = 0
+            card.ZIndex = 5
+            card.Parent = page
+            axionCorner(card, 12)
+            axionStroke(card, 0.68)
+            local cardLayout = Instance.new("UIListLayout")
+            cardLayout.Padding = UDim.new(0, 7)
+            cardLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            cardLayout.Parent = card
+            local cardPadding = Instance.new("UIPadding")
+            cardPadding.PaddingTop = UDim.new(0, 12)
+            cardPadding.PaddingBottom = UDim.new(0, 12)
+            cardPadding.PaddingLeft = UDim.new(0, 12)
+            cardPadding.PaddingRight = UDim.new(0, 12)
+            cardPadding.Parent = card
+            local heading = axionLabel(card, sectionOptions.Title or "Section", UDim2.new(1, 0, 0, 18), UDim2.new(), 12, AxionPalette.text, Enum.Font.GothamBold)
+            heading.LayoutOrder = 1
+            if sectionOptions.Desc and sectionOptions.Desc ~= "" then
+                local sub = axionLabel(card, sectionOptions.Desc, UDim2.new(1, 0, 0, 30), UDim2.new(), 10, AxionPalette.muted, Enum.Font.Gotham)
+                sub.TextYAlignment = Enum.TextYAlignment.Top
+                sub.LayoutOrder = 2
+            end
+            local contentLayoutOrder = 3
+            local function makeRow(height)
+                local row = Instance.new("Frame")
+                row.Size = UDim2.new(1, 0, 0, height)
+                row.BackgroundTransparency = 1
+                row.BorderSizePixel = 0
+                row.ZIndex = 6
+                row.LayoutOrder = contentLayoutOrder
+                contentLayoutOrder += 1
+                row.Parent = card
+                return row
+            end
+            function section:Paragraph(paragraphOptions)
+                paragraphOptions = paragraphOptions or {}
+                local row = makeRow(45)
+                local title = axionLabel(row, paragraphOptions.Title or "Status", UDim2.new(1, 0, 0, 16), UDim2.new(), 10, AxionPalette.accentPink, Enum.Font.GothamBold)
+                local desc = axionLabel(row, paragraphOptions.Desc or "", UDim2.new(1, 0, 0, 27), UDim2.new(0, 0, 0, 16), 10, AxionPalette.text, Enum.Font.Gotham)
+                desc.TextYAlignment = Enum.TextYAlignment.Top
+                local object = {}
+                function object:SetDesc(value) desc.Text = tostring(value or "") end
+                function object:SetTitle(value) title.Text = tostring(value or "") end
+                return object
+            end
+            function section:Button(buttonOptions)
+                buttonOptions = buttonOptions or {}
+                local row = makeRow(buttonOptions.Desc and buttonOptions.Desc ~= "" and 62 or 42)
+                local button = Instance.new("TextButton")
+                button.Size = UDim2.new(1, 0, 0, 38)
+                button.Position = UDim2.new(0, 0, 0, buttonOptions.Desc and buttonOptions.Desc ~= "" and 22 or 2)
+                button.BackgroundColor3 = AxionPalette.track
+                button.BackgroundTransparency = 0.15
+                button.BorderSizePixel = 0
+                button.Text = "   " .. tostring(buttonOptions.Title or "Action") .. "     ›"
+                button.TextSize = 11
+                button.TextColor3 = AxionPalette.text
+                button.TextXAlignment = Enum.TextXAlignment.Left
+                button.Font = Enum.Font.GothamMedium
+                button.AutoButtonColor = true
+                button.ZIndex = 7
+                button.Parent = row
+                axionCorner(button, 9)
+                local stroke = axionStroke(button, 0.72)
+                if buttonOptions.Desc and buttonOptions.Desc ~= "" then
+                    local d = axionLabel(row, buttonOptions.Desc, UDim2.new(1, 0, 0, 16), UDim2.new(), 9, AxionPalette.muted, Enum.Font.Gotham)
+                    d.ZIndex = 7
+                end
+                button.MouseButton1Click:Connect(function()
+                    if buttonOptions.Callback then
+                        local ok, err = pcall(buttonOptions.Callback)
+                        if not ok then warn("[Xexer Dump] Button callback failed: " .. tostring(err)) end
+                    end
+                end)
+                button.MouseEnter:Connect(function() stroke.Transparency = 0.25 end)
+                button.MouseLeave:Connect(function() stroke.Transparency = 0.72 end)
+                return button
+            end
+            function section:Toggle(toggleOptions)
+                toggleOptions = toggleOptions or {}
+                local row = makeRow(toggleOptions.Desc and toggleOptions.Desc ~= "" and 58 or 38)
+                local label = axionLabel(row, toggleOptions.Title or "Toggle", UDim2.new(1, -70, 0, 18), UDim2.new(), 11, AxionPalette.text, Enum.Font.GothamMedium)
+                if toggleOptions.Desc and toggleOptions.Desc ~= "" then
+                    local d = axionLabel(row, toggleOptions.Desc, UDim2.new(1, -70, 0, 28), UDim2.new(0, 0, 0, 19), 9, AxionPalette.muted, Enum.Font.Gotham)
+                    d.TextYAlignment = Enum.TextYAlignment.Top
+                end
+                local toggle = Instance.new("TextButton")
+                toggle.Size = UDim2.fromOffset(44, 24)
+                toggle.Position = UDim2.new(1, -44, 0, 4)
+                toggle.BackgroundColor3 = AxionPalette.track
+                toggle.BorderSizePixel = 0
+                toggle.Text = ""
+                toggle.AutoButtonColor = false
+                toggle.ZIndex = 8
+                toggle.Parent = row
+                axionCorner(toggle, 99)
+                local fill = Instance.new("Frame")
+                fill.Size = UDim2.new(1, 0, 1, 0)
+                fill.BackgroundColor3 = AxionPalette.accentBlue
+                fill.BackgroundTransparency = 1
+                fill.BorderSizePixel = 0
+                fill.ZIndex = 9
+                fill.Parent = toggle
+                axionCorner(fill, 99)
+                axionGradient(fill, 0)
+                local knob = Instance.new("Frame")
+                knob.Size = UDim2.fromOffset(18, 18)
+                knob.Position = UDim2.new(0, 3, 0.5, -9)
+                knob.BackgroundColor3 = AxionPalette.text
+                knob.BorderSizePixel = 0
+                knob.ZIndex = 10
+                knob.Parent = toggle
+                axionCorner(knob, 99)
+                local value = toggleOptions.Value == true
+                local function render()
+                    fill.BackgroundTransparency = value and 0 or 1
+                    knob.Position = value and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
+                end
+                local function setValue(nextValue, fire)
+                    value = nextValue == true
+                    render()
+                    if fire and toggleOptions.Callback then
+                        local ok, err = pcall(toggleOptions.Callback, value)
+                        if not ok then warn("[Xexer Dump] Toggle callback failed: " .. tostring(err)) end
+                    end
+                end
+                render()
+                toggle.MouseButton1Click:Connect(function() setValue(not value, true) end)
+                local object = {}
+                function object:SetValue(nextValue) setValue(nextValue, false) end
+                function object:GetValue() return value end
+                return object
+            end
+            function section:Dropdown(dropOptions)
+                dropOptions = dropOptions or {}
+                local row = makeRow(60)
+                axionLabel(row, dropOptions.Title or "Select", UDim2.new(1, 0, 0, 17), UDim2.new(), 11, AxionPalette.text, Enum.Font.GothamMedium)
+                if dropOptions.Desc and dropOptions.Desc ~= "" then
+                    local d = axionLabel(row, dropOptions.Desc, UDim2.new(1, 0, 0, 14), UDim2.new(0, 0, 0, 17), 9, AxionPalette.muted)
+                    d.TextYAlignment = Enum.TextYAlignment.Top
+                end
+                local button = Instance.new("TextButton")
+                button.Size = UDim2.new(1, 0, 0, 28)
+                button.Position = UDim2.new(0, 0, 0, 32)
+                button.BackgroundColor3 = AxionPalette.track
+                button.BorderSizePixel = 0
+                button.TextSize = 10
+                button.TextColor3 = AxionPalette.text
+                button.TextXAlignment = Enum.TextXAlignment.Left
+                button.Font = Enum.Font.Gotham
+                button.AutoButtonColor = true
+                button.ZIndex = 8
+                button.Parent = row
+                axionCorner(button, 8)
+
+                local values = dropOptions.Values or {}
+                local selected = dropOptions.Value
+                local menu = Instance.new("ScrollingFrame")
+                menu.Name = "OptionsMenu"
+                menu.Size = UDim2.new(1, 0, 0, 145)
+                menu.Position = UDim2.new(0, 0, 0, 63)
+                menu.BackgroundColor3 = AxionPalette.panelBottom
+                menu.BorderSizePixel = 0
+                menu.ScrollBarThickness = 3
+                menu.ScrollBarImageColor3 = AxionPalette.accentPink
+                menu.CanvasSize = UDim2.new(0, 0, 0, 0)
+                menu.AutomaticCanvasSize = Enum.AutomaticSize.Y
+                menu.Visible = false
+                menu.ZIndex = 25
+                menu.Parent = row
+                axionCorner(menu, 8)
+                axionStroke(menu, 0.25)
+                local menuLayout = Instance.new("UIListLayout")
+                menuLayout.Padding = UDim.new(0, 2)
+                menuLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                menuLayout.Parent = menu
+                local menuPadding = Instance.new("UIPadding")
+                menuPadding.PaddingTop = UDim.new(0, 4)
+                menuPadding.PaddingBottom = UDim.new(0, 4)
+                menuPadding.PaddingLeft = UDim.new(0, 4)
+                menuPadding.PaddingRight = UDim.new(0, 4)
+                menuPadding.Parent = menu
+
+                local function render()
+                    button.Text = "  " .. tostring(selected or "Select an option") .. (menu.Visible and "    ▴" or "    ▾")
+                end
+                local function choose(value)
+                    selected = value
+                    menu.Visible = false
+                    render()
+                    if dropOptions.Callback then
+                        local ok, err = pcall(dropOptions.Callback, selected)
+                        if not ok then warn("[Xexer Dump] Dropdown callback failed: " .. tostring(err)) end
+                    end
+                end
+                for i, value in ipairs(values) do
+                    local option = Instance.new("TextButton")
+                    option.Name = "Option_" .. tostring(i)
+                    option.Size = UDim2.new(1, -2, 0, 25)
+                    option.BackgroundColor3 = AxionPalette.panelTop
+                    option.BackgroundTransparency = 0.2
+                    option.BorderSizePixel = 0
+                    option.Text = "  " .. tostring(value)
+                    option.TextSize = 10
+                    option.TextColor3 = AxionPalette.text
+                    option.TextXAlignment = Enum.TextXAlignment.Left
+                    option.Font = Enum.Font.Gotham
+                    option.AutoButtonColor = true
+                    option.LayoutOrder = i
+                    option.ZIndex = 26
+                    option.Parent = menu
+                    axionCorner(option, 6)
+                    option.MouseButton1Click:Connect(function() choose(value) end)
+                end
+                render()
+                button.MouseButton1Click:Connect(function()
+                    menu.Visible = not menu.Visible
+                    render()
+                end)
+                local object = {}
+                function object:SetValue(value)
+                    selected = value
+                    menu.Visible = false
+                    render()
+                    if dropOptions.Callback then dropOptions.Callback(value) end
+                end
+                function object:GetValue() return selected end
+                return object
+            end
+            return section
+        end
+        return tab
+    end
+    return Window
+end
+
+local WindUI = AxionUI
+
+-- Localization System (รองรับ TH / EN)
+local currentLang = _G.XexerLanguage or "EN"
+local Loc = {
+    EN = {
+        Title = "Xexer Dump",
+        Author = "by 777",
+        Tag = "Ultimate Dumper",
+        Tab1 = "Script Toolkit",
+        Tab2 = "Remote Dumper",
+        Tab3 = "Dump Explorer",
+        Ready = "Ready",
+        ToolkitDesc = "Complete indexing, boilerplate, and full game dump in one click",
+        DecompileMod = "Decompile ModuleScripts Source",
+        DecompileDesc = "Extract Lua source code for all indexed modules (Slower)",
+        ActionOut = "Action & Output",
+        ActionDesc = "Generates a fully formed .txt scripting workspace",
+        RunMaster = "Execute Master Dump (.txt)",
+        RunMasterDesc = "Indexes all services, remotes, configs, and saves as a single .txt file",
+        RemoteSecTitle = "All Remote Scanner",
+        RemoteSecDesc = "Extract all RemoteEvents and RemoteFunctions across the game",
+        DumpRemotesBtn = "Dump All Remotes (.txt)",
+        DumpRemotesDesc = "Search and dump all Remotes in the game to a single .txt file",
+        SpyTitle = "Runtime Remote Spy (Argument Logger)",
+        SpyDesc = "Capture live remote calls and arguments while playing",
+        EnableSpy = "Enable Remote Spy Hook",
+        EnableSpyDesc = "Start capturing remote calls and arguments in real-time",
+        SaveSpyBtn = "Save Spied Logs (.txt)",
+        SaveSpyDesc = "Save all captured remote calls and arguments to workspace",
+        ClearSpyBtn = "Clear Captured Logs",
+        ClearSpyDesc = "Reset captured spy data",
+        ConfigSec = "Configuration",
+        ConfigDesc = "Select a target service to dump",
+        TargetDrop = "Target Service",
+        TargetDesc = "Choose a service or select Full Dump for the whole game",
+        DecompileExp = "Decompile ModuleScripts",
+        DecompileExpDesc = "Decompile module source code (takes longer)",
+        ExecSec = "Execution & Status",
+        ExecDesc = "Execute process and monitor real-time output",
+        StartDumpBtn = "Start Dump (.txt)",
+        StartDumpDesc = "Scan service hierarchy tree and save as .txt to workspace",
+    },
+    TH = {
+        Title = "Xexer Dump",
+        Author = "โดย 777",
+        Tag = "ระบบดึงข้อมูลขั้นสุดยอด",
+        Tab1 = "ชุดเครื่องมือสคริปต์",
+        Tab2 = "ตัวดึงรีโมท (Remote)",
+        Tab3 = "สำรวจโครงสร้างข้อมูล",
+        Ready = "พร้อมใช้งาน",
+        ToolkitDesc = "สแกนข้อมูล สร้างโค้ดโครงสร้าง และดึงข้อมูลเกมทั้งหมดได้ในคลิกเดียว",
+        DecompileMod = "ถอดรหัสซอร์สโค้ด ModuleScripts",
+        DecompileDesc = "ดึงโค้ด Lua ภายในโมดูลทั้งหมด (ใช้เวลาช้าลงเล็กน้อย)",
+        ActionOut = "การทำงานและผลลัพธ์",
+        ActionDesc = "สร้างไฟล์พื้นที่ทำงานสคริปต์ในรูปแบบ .txt สมบูรณ์แบบ",
+        RunMaster = "รันมาสเตอร์ดัมพ์ (.txt)",
+        RunMasterDesc = "ดัชนีบริการ รีโมท โมดูล และบันทึกเป็นไฟล์ .txt เดียว",
+        RemoteSecTitle = "สแกนรีโมททั้งหมด",
+        RemoteSecDesc = "ดึงข้อมูล RemoteEvents และ RemoteFunctions ทั้งหมดในเกม",
+        DumpRemotesBtn = "ดัมพ์รีโมททั้งหมด (.txt)",
+        DumpRemotesDesc = "ค้นหาและบันทึกรีโมททั้งหมดลงในไฟล์ .txt",
+        SpyTitle = "สปายรีโมทขณะเล่น (บันทึก Arguments)",
+        SpyDesc = "ดักจับการเรียกใช้รีโมทและค่าพารามิเตอร์แบบเรียลไทม์",
+        EnableSpy = "เปิดใช้งานตัวดักจับรีโมท",
+        EnableSpyDesc = "เริ่มบันทึกการเรียกใช้รีโมทและค่า Arguments ทันที",
+        SaveSpyBtn = "บันทึกประวัติสปาย (.txt)",
+        SaveSpyDesc = "บันทึกข้อมูลการเรียกรีโมททั้งหมดลงในโฟลเดอร์ workspace",
+        ClearSpyBtn = "ล้างประวัติที่บันทึก",
+        ClearSpyDesc = "รีเซ็ตข้อมูลสปายทั้งหมด",
+        ConfigSec = "การตั้งค่า",
+        ConfigDesc = "เลือกบริการที่ต้องการดัมพ์",
+        TargetDrop = "บริการเป้าหมาย",
+        TargetDesc = "เลือก Service หรือเลือกดัมพ์ทั้งหมดของเกม",
+        DecompileExp = "ถอดรหัส ModuleScripts",
+        DecompileExpDesc = "ดึงซอร์สโค้ดโมดูล (ใช้เวลานานขึ้น)",
+        ExecSec = "การทำงานและสถานะ",
+        ExecDesc = "เริ่มกระบวนการและตรวจสอบสถานะแบบเรียลไทม์",
+        StartDumpBtn = "เริ่มดัมพ์โครงสร้าง (.txt)",
+        StartDumpDesc = "สแกนโครงสร้าง Service และบันทึกเป็นไฟล์ .txt",
+    }
+}
+
+local function L(key)
+    return Loc[currentLang][key] or Loc["EN"][key] or key
+end
+
+-- AxionHub-inspired dark gradient theme.
+WindUI:AddTheme({ Name = "AxionHub" })
+
+local LOGO_ID = "rbxassetid://76489696691275"
+
+-- Create the main window through the built-in AxionHub-style adapter.
+local Window = WindUI:CreateWindow({
+    Title = L("Title"),
+    Author = L("Author"),
+    Icon = LOGO_ID,
+    Theme = "AxionHub",
+    Transparent = true,
+    Topbar = { Height = 52, ButtonsType = "Mac" },
+    Size = UDim2.fromOffset(660, 500),
+})
+
+Window:EditOpenButton({
+    Title = L("Title"),
+    Icon = LOGO_ID,
+    Enabled = true,
+    Draggable = true,
+})
+
+Window:Tag({
+    Title = L("Tag"),
+    Icon = "database",
+    Color = Color3.fromRGB(93, 117, 255),
+    Radius = 13,
+})
+
+pcall(function() Window:SetBackgroundTransparency(0.04) end)
+
+-- Gather all game services and sort alphabetically (A-Z)
+local serviceList = {}
+for _, service in ipairs(game:GetChildren()) do
+    pcall(function()
+        if service and service.Name then
+            table.insert(serviceList, service.Name)
+        end
     end)
 end
 
-local okGui, guiErr = pcall(makeGui)
-if not okGui then
-    warn("[MapDumper] makeGui error: " .. tostring(guiErr))
+table.insert(serviceList, "PlayerScripts")
+table.insert(serviceList, "PlayerGui")
+table.insert(serviceList, "LocalPlayer Character")
+
+table.sort(serviceList, function(a, b)
+    return a:lower() < b:lower()
+end)
+
+local TARGET_OPTIONS = { "[All Services - Full Dump]" }
+for _, name in ipairs(serviceList) do
+    table.insert(TARGET_OPTIONS, name)
 end
+
+-- Shared Utility Functions
+local function formatTree(instance, depth)
+    local indent = string.rep("    ", depth)
+    local branch = depth > 0 and "|-- " or ""
+    return string.format("%s%s[%s] %s", indent, branch, instance.ClassName, instance.Name)
+end
+
+local function getCleanPath(inst)
+    local parts = {}
+    local curr = inst
+    while curr and curr ~= game do
+        local name = curr.Name
+        if name:match("^[%a_][%w_]*$") then
+            table.insert(parts, 1, "." .. name)
+        else
+            table.insert(parts, 1, '["' .. name:gsub('"', '\\"') .. '"]')
+        end
+        curr = curr.Parent
+    end
+    if #parts > 0 and parts[1]:sub(1, 1) == "." then
+        parts[1] = parts[1]:sub(2)
+    end
+    local serviceName = inst:GetFullName():split(".")[1]
+    return "game:GetService(\"" .. serviceName .. "\")." .. table.concat(parts, ""):gsub("^[^%.]+%.?", "")
+end
+
+local function serializeValue(val, depth)
+    depth = depth or 0
+    if depth > 3 then return "[Max Depth]" end
+    local customType = typeof(val)
+    if customType == "string" then
+        return '"' .. val:gsub('"', '\\"') .. '"'
+    elseif customType == "number" or customType == "boolean" then
+        return tostring(val)
+    elseif customType == "nil" then
+        return "nil"
+    elseif customType == "table" then
+        local parts = {}
+        local count = 0
+        for k, v in pairs(val) do
+            count = count + 1
+            if count > 16 then table.insert(parts, "..."); break end
+            table.insert(parts, tostring(k) .. " = " .. serializeValue(v, depth + 1))
+        end
+        return "{" .. table.concat(parts, ", ") .. "}"
+    elseif customType == "Instance" then
+        return getCleanPath(val)
+    elseif customType == "Vector3" then
+        return string.format("Vector3(%g, %g, %g)", val.X, val.Y, val.Z)
+    elseif customType == "Vector2" then
+        return string.format("Vector2(%g, %g)", val.X, val.Y)
+    elseif customType == "CFrame" then
+        local p = val.Position
+        return string.format("CFrame(%g, %g, %g)", p.X, p.Y, p.Z)
+    elseif customType == "Color3" then
+        return string.format("Color3(%d, %d, %d)", math.floor(val.R*255), math.floor(val.G*255), math.floor(val.B*255))
+    elseif customType == "EnumItem" then
+        return tostring(val)
+    elseif customType == "UDim2" then
+        return string.format("UDim2(%g, %g, %g, %g)", val.X.Scale, val.X.Offset, val.Y.Scale, val.Y.Offset)
+    elseif customType == "UDim" then
+        return string.format("UDim(%g, %g)", val.Scale, val.Offset)
+    elseif customType == "Rect" then
+        return string.format("Rect(%g, %g, %g, %g)", val.Min.X, val.Min.Y, val.Max.X, val.Max.Y)
+    else
+        return "[" .. customType .. "]"
+    end
+end
+
+-- ==============================================================================
+-- TAB 1: SCRIPT TOOLKIT
+-- ==============================================================================
+local ToolTab = Window:Tab({ Title = L("Tab1"), Icon = "file-code" })
+
+local SettingsToolkit = {
+    DecompileSource = false,
+    IsRunning = false
+}
+
+local toolCfgSec = ToolTab:Section({
+    Opened = true,
+    Title = L("ToolkitDesc"),
+    Desc = ""
+})
+
+toolCfgSec:Toggle({
+    Title = L("DecompileMod"),
+    Desc = L("DecompileDesc"),
+    Value = false,
+    Callback = function(v)
+        SettingsToolkit.DecompileSource = v
+    end
+})
+
+local toolActSec = ToolTab:Section({
+    Opened = true,
+    Title = L("ActionOut"),
+    Desc = L("ActionDesc")
+})
+
+local statusParaToolkit = toolActSec:Paragraph({
+    Title = "Status",
+    Desc = L("Ready")
+})
+
+local function setStatusToolkit(msg)
+    pcall(function() statusParaToolkit:SetDesc(tostring(msg)) end)
+end
+
+toolActSec:Button({
+    Title = L("RunMaster"),
+    Desc = L("RunMasterDesc"),
+    Callback = function()
+        if SettingsToolkit.IsRunning then return end
+        SettingsToolkit.IsRunning = true
+        setStatusToolkit("Starting Master Dump...")
+
+        task.spawn(function()
+            local startTime = os.clock()
+            local remotesFound = {}
+            local modulesFound = {}
+            local promptsFound = {}
+            local fullOutput = {}
+
+            local servicesToScan = {
+                game:GetService("ReplicatedStorage"),
+                game:GetService("Workspace"),
+                game:GetService("Lighting"),
+                game:GetService("StarterGui"),
+                game:GetService("SoundService"),
+                game:GetService("MaterialService")
+            }
+
+            if LP and LP:FindFirstChild("PlayerScripts") then
+                table.insert(servicesToScan, LP.PlayerScripts)
+            end
+            if LP and LP:FindFirstChild("PlayerGui") then
+                table.insert(servicesToScan, LP.PlayerGui)
+            end
+            if LP and LP.Character then
+                table.insert(servicesToScan, LP.Character)
+            end
+
+            local totalObjects = 0
+
+            for _, svc in ipairs(servicesToScan) do
+                pcall(function()
+                    for _, obj in ipairs(svc:GetDescendants()) do
+                        totalObjects = totalObjects + 1
+                        if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") or obj:IsA("UnreliableRemoteEvent") then
+                            table.insert(remotesFound, obj)
+                        elseif obj:IsA("ModuleScript") then
+                            table.insert(modulesFound, obj)
+                        elseif obj:IsA("ProximityPrompt") then
+                            table.insert(promptsFound, obj)
+                        end
+                    end
+                end)
+            end
+
+            table.insert(fullOutput, "----------------------------------------------------------------------")
+            table.insert(fullOutput, "-- [XEXER DUMP: READY-TO-SCRIPT WORKSPACE]")
+            table.insert(fullOutput, "-- Place ID: " .. tostring(game.PlaceId) .. " | Job ID: " .. game.JobId)
+            table.insert(fullOutput, "-- Generated: " .. os.date("%Y-%m-%d %H:%M:%S"))
+            table.insert(fullOutput, "----------------------------------------------------------------------\n")
+
+            table.insert(fullOutput, "--------------------------------------------------")
+            table.insert(fullOutput, "-- 1. SCRIPT STARTER BOILERPLATE (COPY & PASTE)")
+            table.insert(fullOutput, "--------------------------------------------------")
+            table.insert(fullOutput, [[
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local WS = game:GetService("Workspace")
+local LP = Players.LocalPlayer
+local Char = LP.Character or LP.CharacterAdded:Wait()
+local HRP = Char:WaitForChild("HumanoidRootPart")
+
+local function fireRemote(remote, ...)
+    if remote:IsA("RemoteEvent") or remote:IsA("UnreliableRemoteEvent") then
+        remote:FireServer(...)
+    elseif remote:IsA("RemoteFunction") then
+        return remote:InvokeServer(...)
+    end
+end
+]])
+
+            table.insert(fullOutput, "\n--------------------------------------------------")
+            table.insert(fullOutput, "-- 2. DISCOVERED REMOTES (" .. #remotesFound .. " Remotes)")
+            table.insert(fullOutput, "--------------------------------------------------")
+            table.insert(fullOutput, "local remotes = {}")
+            for i, rem in ipairs(remotesFound) do
+                pcall(function()
+                    table.insert(fullOutput, string.format("remotes[%d] = %s -- Class: %s", i, getCleanPath(rem), rem.ClassName))
+                end)
+            end
+
+            table.insert(fullOutput, "\n--------------------------------------------------")
+            table.insert(fullOutput, "-- 3. CONFIG & DATA MODULES (" .. #modulesFound .. " Modules)")
+            table.insert(fullOutput, "--------------------------------------------------")
+            for _, mod in ipairs(modulesFound) do
+                pcall(function()
+                    table.insert(fullOutput, string.format("-- [%s] %s", mod.Name, getCleanPath(mod)))
+                end)
+            end
+
+            table.insert(fullOutput, "\n--------------------------------------------------")
+            table.insert(fullOutput, "-- 4. PROXIMITY PROMPTS (" .. #promptsFound .. " Prompts)")
+            table.insert(fullOutput, "--------------------------------------------------")
+            for _, prm in ipairs(promptsFound) do
+                pcall(function()
+                    table.insert(fullOutput, string.format("-- Action: '%s' | Object: '%s' | Path: %s", prm.ActionText, prm.ObjectText, getCleanPath(prm)))
+                end)
+            end
+
+            table.insert(fullOutput, "\n--------------------------------------------------")
+            table.insert(fullOutput, "-- 5. COMPLETE HIERARCHY TREE")
+            table.insert(fullOutput, "--------------------------------------------------")
+
+            local function scanBranch(parentInstance, depth)
+                for _, child in ipairs(parentInstance:GetChildren()) do
+                    table.insert(fullOutput, formatTree(child, depth))
+
+                    if SettingsToolkit.DecompileSource and child:IsA("ModuleScript") then
+                        local indent = string.rep("    ", depth + 1)
+                        table.insert(fullOutput, indent .. "/* [SOURCE CODE: " .. child.Name .. "] */")
+                        local success, code = pcall(function()
+                            return decompile and decompile(child) or "-- Decompile unsupported"
+                        end)
+                        if success and code and code ~= "" then
+                            for line in string.gmatch(code, "[^\r\n]+") do
+                                table.insert(fullOutput, indent .. line)
+                            end
+                        end
+                        table.insert(fullOutput, indent .. "/* [END SOURCE] */\n")
+                    end
+                    scanBranch(child, depth + 1)
+                end
+            end
+
+            for _, root in ipairs(servicesToScan) do
+                pcall(function()
+                    table.insert(fullOutput, string.format("\n[ ROOT SERVICE: %s ]", root.Name))
+                    table.insert(fullOutput, string.rep("-", 40))
+                    scanBranch(root, 0)
+                end)
+            end
+
+            local elapsed = string.format("%.2f", os.clock() - startTime)
+            local fileName = string.format("XexerScriptDump_%s.txt", tostring(game.PlaceId))
+
+            if writefile then
+                writefile(fileName, table.concat(fullOutput, "\n"))
+                setStatusToolkit("Done! Saved " .. fileName)
+                WindUI:Notify({ Title = "Success", Content = "Saved " .. fileName, Icon = "check", Duration = 4 })
+            end
+            SettingsToolkit.IsRunning = false
+        end)
+    end
+})
+
+-- ==============================================================================
+-- TAB 2: REMOTE DUMPER & RUNTIME SPY
+-- ==============================================================================
+local RemoteTab = Window:Tab({ Title = L("Tab2"), Icon = "radio" })
+
+local isDumpingRemotes = false
+local remSec = RemoteTab:Section({
+    Opened = true,
+    Title = L("RemoteSecTitle"),
+    Desc = L("RemoteSecDesc")
+})
+
+local remoteStatusPara = remSec:Paragraph({
+    Title = "Status",
+    Desc = L("Ready")
+})
+
+local function setRemoteStatus(msg)
+    pcall(function() remoteStatusPara:SetDesc(tostring(msg)) end)
+end
+
+local function dumpAllRemotes()
+    if isDumpingRemotes then return end
+    isDumpingRemotes = true
+    setRemoteStatus("Scanning...")
+
+    task.spawn(function()
+        local remotesFound = {}
+        local fullOutput = {}
+        local servicesToScan = {
+            game:GetService("ReplicatedStorage"),
+            game:GetService("Workspace"),
+            game:GetService("Lighting"),
+            game:GetService("StarterGui"),
+            game:GetService("SoundService"),
+            game:GetService("MaterialService")
+        }
+
+        for _, svc in ipairs(servicesToScan) do
+            pcall(function()
+                for _, obj in ipairs(svc:GetDescendants()) do
+                    if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") or obj:IsA("UnreliableRemoteEvent") then
+                        table.insert(remotesFound, obj)
+                    end
+                end
+            end)
+        end
+
+        table.insert(fullOutput, "==================================================")
+        table.insert(fullOutput, "           XEXER ALL REMOTES DUMP REPORT          ")
+        table.insert(fullOutput, "==================================================\n")
+
+        for i, rem in ipairs(remotesFound) do
+            pcall(function()
+                local path = getCleanPath(rem)
+                local callSyntax = rem:IsA("RemoteFunction") and ":InvokeServer(...)" or ":FireServer(...)"
+                table.insert(fullOutput, string.format("[%d] %s\n    Path : %s\n    Usage: %s%s\n", i, rem.Name, path, path, callSyntax))
+            end)
+        end
+
+        local fileName = string.format("Xexer_AllRemotes_%s.txt", tostring(game.PlaceId))
+        if writefile then
+            writefile(fileName, table.concat(fullOutput, "\n"))
+            setRemoteStatus("Saved: " .. fileName)
+            WindUI:Notify({ Title = "Success", Content = "Saved " .. fileName, Icon = "check", Duration = 4 })
+        end
+        isDumpingRemotes = false
+    end)
+end
+
+remSec:Button({
+    Title = L("DumpRemotesBtn"),
+    Desc = L("DumpRemotesDesc"),
+    Callback = function() dumpAllRemotes() end
+})
+
+local spySec = RemoteTab:Section({
+    Opened = true,
+    Title = L("SpyTitle"),
+    Desc = L("SpyDesc")
+})
+
+local spiedCalls = {}
+local isSpyingActive = false
+
+local spyStatusPara = spySec:Paragraph({
+    Title = "Status",
+    Desc = L("Ready")
+})
+
+local function updateSpyStatus(msg)
+    pcall(function() spyStatusPara:SetDesc(msg .. " (Captured: " .. #spiedCalls .. ")") end)
+end
+
+pcall(function()
+    if hookmetamethod and getnamecallmethod then
+        local oldNamecall
+        oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+            if isSpyingActive then
+                local method = getnamecallmethod()
+                if method == "FireServer" or method == "InvokeServer" or method == "fireserver" or method == "invokeserver" then
+                    if typeof(self) == "Instance" and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction") or self:IsA("UnreliableRemoteEvent")) then
+                        table.insert(spiedCalls, {
+                            Name = self.Name,
+                            Class = self.ClassName,
+                            Path = getCleanPath(self),
+                            Method = method,
+                            Arguments = {...},
+                            Time = os.date("%H:%M:%S")
+                        })
+                        -- updateSpyStatus ถูกถอดออกจาก hook เพื่อกัน UI lag spike
+                        -- เกมยิง Remote ตลอดเวลา การ update UI ทุก call ทำให้ fps ตก
+                        -- สถานะจะอัปเดตเมื่อกด Save หรือ Clear แทน
+                    end
+                end
+            end
+            return oldNamecall(self, ...)
+        end)
+    end
+end)
+
+spySec:Toggle({
+    Title = L("EnableSpy"),
+    Desc = L("EnableSpyDesc"),
+    Value = false,
+    Callback = function(v)
+        isSpyingActive = v
+        updateSpyStatus(v and "Active" or "Paused")
+    end
+})
+
+spySec:Button({
+    Title = L("SaveSpyBtn"),
+    Desc = L("SaveSpyDesc"),
+    Callback = function()
+        if #spiedCalls == 0 then return end
+        local output = {}
+        table.insert(output, "==================================================")
+        table.insert(output, "       XEXER RUNTIME REMOTE SPY & ARGUMENTS       ")
+        table.insert(output, "==================================================\n")
+
+        for i, call in ipairs(spiedCalls) do
+            table.insert(output, string.format("[%d] [%s] %s (%s)", i, call.Time, call.Name, call.Class))
+            table.insert(output, string.format("    Path   : %s", call.Path))
+            table.insert(output, string.format("    Method : :%s(...)", call.Method))
+            table.insert(output, "    Args   :")
+            for argIdx, argVal in ipairs(call.Arguments) do
+                table.insert(output, string.format("      Arg #%d: %s", argIdx, serializeValue(argVal)))
+            end
+            table.insert(output, "")
+        end
+
+        local fileName = string.format("Xexer_RemoteSpy_%s.txt", tostring(game.PlaceId))
+        if writefile then
+            writefile(fileName, table.concat(output, "\n"))
+            WindUI:Notify({ Title = "Success", Content = "Saved " .. fileName, Icon = "check", Duration = 4 })
+        end
+    end
+})
+
+spySec:Button({
+    Title = L("ClearSpyBtn"),
+    Desc = L("ClearSpyDesc"),
+    Callback = function()
+        spiedCalls = {}
+        updateSpyStatus("Cleared")
+    end
+})
+
+-- ==============================================================================
+-- TAB 3: DUMP EXPLORER
+-- ==============================================================================
+local DumpTab = Window:Tab({ Title = L("Tab3"), Icon = "folder-archive" })
+
+local SettingsExplorer = {
+    Target = TARGET_OPTIONS[1],
+    IncludeSource = false,
+    IsDumping = false
+}
+
+local cfgSec = DumpTab:Section({
+    Opened = true,
+    Title = L("ConfigSec"),
+    Desc = L("ConfigDesc")
+})
+
+cfgSec:Dropdown({
+    Title = L("TargetDrop"),
+    Desc = L("TargetDesc"),
+    Values = TARGET_OPTIONS,
+    Value = SettingsExplorer.Target,
+    Callback = function(val)
+        SettingsExplorer.Target = val
+    end
+})
+
+cfgSec:Toggle({
+    Title = L("DecompileExp"),
+    Desc = L("DecompileExpDesc"),
+    Value = false,
+    Callback = function(val)
+        SettingsExplorer.IncludeSource = val
+    end
+})
+
+local actionSec = DumpTab:Section({
+    Opened = true,
+    Title = L("ExecSec"),
+    Desc = L("ExecDesc")
+})
+
+local statusParaExplorer = actionSec:Paragraph({
+    Title = "Status",
+    Desc = L("Ready")
+})
+
+actionSec:Button({
+    Title = L("StartDumpBtn"),
+    Desc = L("StartDumpDesc"),
+    Callback = function()
+        if SettingsExplorer.IsDumping then return end
+        SettingsExplorer.IsDumping = true
+
+        task.spawn(function()
+            local targetRoots = {}
+            local selected = SettingsExplorer.Target
+
+            if selected == "[All Services - Full Dump]" then
+                for _, s in ipairs(game:GetChildren()) do
+                    pcall(function() table.insert(targetRoots, s) end)
+                end
+            elseif selected == "PlayerScripts" then
+                if LP and LP:FindFirstChild("PlayerScripts") then table.insert(targetRoots, LP.PlayerScripts) end
+            elseif selected == "PlayerGui" then
+                if LP and LP:FindFirstChild("PlayerGui") then table.insert(targetRoots, LP.PlayerGui) end
+            elseif selected == "LocalPlayer Character" then
+                if LP and LP.Character then table.insert(targetRoots, LP.Character) end
+            else
+                local found = game:FindFirstChild(selected)
+                if found then table.insert(targetRoots, found) end
+            end
+
+            local output = {}
+            table.insert(output, "==================================================")
+            table.insert(output, "               XEXER DATA DUMP REPORT             ")
+            table.insert(output, "==================================================\n")
+
+            local totalObjects = 0
+            local function scanHierarchy(parentInstance, depth)
+                for _, child in ipairs(parentInstance:GetChildren()) do
+                    totalObjects = totalObjects + 1
+                    table.insert(output, formatTree(child, depth))
+                    if SettingsExplorer.IncludeSource and child:IsA("ModuleScript") then
+                        local indent = string.rep("    ", depth + 1)
+                        table.insert(output, indent .. "/* [SOURCE] */")
+                        local success, code = pcall(function() return decompile and decompile(child) or "-- Unported" end)
+                        if success and code then
+                            for line in string.gmatch(code, "[^\r\n]+") do
+                                table.insert(output, indent .. line)
+                            end
+                        end
+                        table.insert(output, indent .. "/* [END] */\n")
+                    end
+                    scanHierarchy(child, depth + 1)
+                end
+            end
+
+            for _, root in ipairs(targetRoots) do
+                pcall(function()
+                    table.insert(output, string.format("\n[ ROOT SERVICE: %s ]", root.Name))
+                    scanHierarchy(root, 0)
+                end)
+            end
+
+            local safeName = selected:gsub("%W", "")
+            local fileName = string.format("XexerDump_%s_%s.txt", safeName, tostring(game.PlaceId))
+
+            if writefile then
+                writefile(fileName, table.concat(output, "\n"))
+                WindUI:Notify({ Title = "Success", Content = "Saved " .. fileName, Icon = "check", Duration = 4 })
+            end
+            SettingsExplorer.IsDumping = false
+        end)
+    end
+})
+
+task.spawn(function()
+    task.wait(0.5)
+    pcall(function() Window:SelectTab(ToolTab) end)
+end)
+
+-- RightShift toggles the main panel; the floating Axion-style button remains available on touch devices.
+pcall(function()
+    game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
+        if not processed and input.KeyCode == Enum.KeyCode.RightShift and AxionWindow then
+            AxionWindow.Visible = not AxionWindow.Visible
+        end
+    end)
+end)
+
+end)
+_G.__PartOK = __ok
+_G.__PartErr = tostring(__err):sub(1, 500)
