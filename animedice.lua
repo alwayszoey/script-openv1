@@ -27,6 +27,10 @@ local RELOAD_FILE = "AxionHub.lua"
 local LOGO_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/Untitled27_20261009042444.png"
 local LOGO_FILE = "AxionHub/logo.png"
 local ICONS_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/dist/Icons.lua"
+-- [แก้] ค่าใหม่สำหรับแคชไอคอนและเวลารอสูงสุด
+local ICONS_CACHE = "AxionHub/icons.lua"
+local ICON_WAIT = 4
+local REMOTE_WAIT = 30
 local GRAPH_BARS = 48
 local SAFE_MAX_RATE = 30
 local WATCHDOG_TIMEOUT = 90
@@ -85,24 +89,6 @@ local Icons = {
 -- Icon library.
 local rawIcons = {}
 
----Download and load the icon table through request.
-local function loadIconLibrary()
-	local ok, response = pcall(request, { Url = ICONS_URL, Method = "GET" })
-	if not ok or not response or not response.Success then
-		return
-	end
-
-	local chunk = loadstring(response.Body)
-	if not chunk then
-		return
-	end
-
-	local loaded, data = pcall(chunk)
-	if loaded and type(data) == "table" then
-		rawIcons = data
-	end
-end
-
 ---Accept an asset id, a url, or an icon name from the library.
 ---@param input string|number
 ---@param fallback string?
@@ -133,7 +119,48 @@ local function getIcon(input, fallback)
 	return fallback or input
 end
 
-pcall(loadIconLibrary)
+-- [แก้] แยก parse ออกมา ใช้ร่วมกันทั้งแคชและดาวน์โหลด
+---@param source string
+---@return boolean
+local function parseIconSource(source)
+	local chunk = loadstring(source)
+	if not chunk then
+		return false
+	end
+
+	local ok, data = pcall(chunk)
+	if ok and type(data) == "table" then
+		rawIcons = data
+		return true
+	end
+
+	return false
+end
+
+---[แก้] อ่านจากแคชก่อน ถ้าไม่มีค่อย request แล้วเซฟลงไฟล์
+---@return boolean
+local function loadIconLibrary()
+	if isfile and readfile and isfile(ICONS_CACHE) then
+		local ok, source = pcall(readfile, ICONS_CACHE)
+		if ok and parseIconSource(source) then
+			return true
+		end
+	end
+
+	local ok, response = pcall(request, { Url = ICONS_URL, Method = "GET" })
+	if not ok or not response or not response.Success or not parseIconSource(response.Body) then
+		return false
+	end
+
+	pcall(function()
+		if makefolder and isfolder and not isfolder(CONFIG_FOLDER) then
+			makefolder(CONFIG_FOLDER)
+		end
+		writefile(ICONS_CACHE, response.Body)
+	end)
+
+	return true
+end
 
 -- Names in the library for each default icon. Missing names keep the default id.
 local ICON_NAMES = {
@@ -163,8 +190,11 @@ local ICON_NAMES = {
 	Link = "link",
 }
 
-for key, name in pairs(ICON_NAMES) do
-	Icons[key] = getIcon(name, Icons[key])
+-- [แก้] เรียกหลังโหลดไลบรารีเสร็จ แทนการรันที่ top-level
+local function applyIconNames()
+	for key, name in pairs(ICON_NAMES) do
+		Icons[key] = getIcon(name, Icons[key])
+	end
 end
 
 local BubbleSoundMap = {
@@ -337,7 +367,8 @@ local function safeParent()
 	return coreGui
 end
 
----Walk a path of children with a timeout on each step.
+-- [แก้] ไม่รอแล้ว ใช้ FindFirstChild (เดิม WaitForChild 5 วิ ต่อ step)
+---Walk a path of children without waiting.
 local function safeFind(root, ...)
 	local node = root
 
@@ -346,15 +377,7 @@ local function safeFind(root, ...)
 			return nil
 		end
 
-		local ok, child = pcall(function()
-			return node:WaitForChild(name, 5)
-		end)
-
-		if not ok or not child then
-			return nil
-		end
-
-		node = child
+		node = node:FindFirstChild(name)
 	end
 
 	return node
@@ -457,15 +480,24 @@ local function loadConfig()
 	State.resumeCollect = data.wasCollecting == true
 end
 
-local Remotes = {
-	rollDice = safeFind(replicatedStorage, "Network", "RollService", "RF", "RollDice"),
-	setAutoRoll = safeFind(replicatedStorage, "Network", "RollService", "RE", "SetAutoRoll"),
-	rollMessage = safeFind(replicatedStorage, "Network", "RollService", "RE", "RollMessage"),
-	collectBalance = safeFind(replicatedStorage, "Network", "PlotService", "RE", "CollectBalance"),
-}
+-- [แก้] resolve แบบเรียกซ้ำได้ ไม่บล็อก (เดิมเรียกครั้งเดียวด้วย WaitForChild)
+local Remotes = {}
+local remotesReady = false
+local collectReady = false
 
-local remotesReady = Remotes.rollDice ~= nil and Remotes.setAutoRoll ~= nil
-local collectReady = Remotes.collectBalance ~= nil
+---Resolve every remote that is still missing. Returns true when all are found.
+---@return boolean
+local function resolveRemotes()
+	Remotes.rollDice = Remotes.rollDice or safeFind(replicatedStorage, "Network", "RollService", "RF", "RollDice")
+	Remotes.setAutoRoll = Remotes.setAutoRoll or safeFind(replicatedStorage, "Network", "RollService", "RE", "SetAutoRoll")
+	Remotes.rollMessage = Remotes.rollMessage or safeFind(replicatedStorage, "Network", "RollService", "RE", "RollMessage")
+	Remotes.collectBalance = Remotes.collectBalance or safeFind(replicatedStorage, "Network", "PlotService", "RE", "CollectBalance")
+
+	remotesReady = Remotes.rollDice ~= nil and Remotes.setAutoRoll ~= nil
+	collectReady = Remotes.collectBalance ~= nil
+
+	return remotesReady and collectReady and Remotes.rollMessage ~= nil
+end
 
 local AntiFX = {
 	camModel = nil,
@@ -1326,6 +1358,172 @@ local function makeLabel(parent, text, size, position, font, textSize, color, al
 	return label
 end
 
+-- [แก้] โลโก้ใช้ fallback ก่อน แล้วอัปเดตทุก label ทีหลังเมื่อโหลดเสร็จ
+local currentLogo = Icons.Logo
+local logoLabels = {}
+
+---ลงทะเบียน ImageLabel ที่เป็นโลโก้ เพื่อให้ setLogo สลับรูปได้
+local function registerLogo(label)
+	table.insert(logoLabels, label)
+	label.Image = currentLogo
+	return label
+end
+
+---สลับโลโก้ทุกที่ที่ลงทะเบียนไว้
+local function setLogo(asset)
+	currentLogo = asset
+
+	for _, label in ipairs(logoLabels) do
+		if label.Parent then
+			label.Image = asset
+		end
+	end
+end
+
+---ถ้ามีไฟล์โลโก้ในแคชแล้วใช้ได้ทันที ไม่ต้อง request
+local function resolveCachedLogo()
+	if not (getcustomasset and isfile and isfile(LOGO_FILE)) then
+		return nil
+	end
+
+	local ok, asset = pcall(getcustomasset, LOGO_FILE)
+	return ok and asset or nil
+end
+
+-- Loading screen.
+local Loading = {
+	gui = nil,
+	root = nil,
+	logo = nil,
+	stepLabel = nil,
+	connection = nil,
+	progress = 0,
+	targetProgress = 0,
+}
+
+---[แก้] หน้าโหลด สร้างทันทีตอนเริ่มสคริปต์ ใช้โลโก้ fallback
+local function createLoadingScreen()
+	local gui = Instance.new("ScreenGui")
+	gui.Name = randomName()
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.DisplayOrder = 1000
+	gui.Parent = safeParent()
+
+	-- CanvasGroup ทำให้ fade ทั้งหน้าด้วยค่าเดียว
+	local root = Instance.new("CanvasGroup")
+	root.Size = UDim2.new(1, 0, 1, 0)
+	root.BackgroundColor3 = WHITE
+	root.BorderSizePixel = 0
+	root.GroupTransparency = 1
+	root.Active = true
+	root.Parent = gui
+	createGradient(root, 115, ColorSequence.new(Config.bgTop, Config.bgBot))
+
+	local logo = makeIcon(root, currentLogo, UDim2.new(0, 84, 0, 84), UDim2.new(0.5, -42, 0.5, -112), WHITE)
+	logo.ScaleType = Enum.ScaleType.Fit
+	registerLogo(logo)
+
+	local logoScale = Instance.new("UIScale")
+	logoScale.Parent = logo
+
+	makeLabel(root, "AxionHub", UDim2.new(0, 300, 0, 28), UDim2.new(0.5, -150, 0.5, -20), Config.fontBold, 22, Config.text, Enum.TextXAlignment.Center)
+
+	local stepLabel = makeLabel(root, "Starting...", UDim2.new(0, 300, 0, 16), UDim2.new(0.5, -150, 0.5, 14), Config.fontMedium, 11, Config.textDim, Enum.TextXAlignment.Center)
+
+	local barTrack = Instance.new("Frame")
+	barTrack.Size = UDim2.new(0, 260, 0, 8)
+	barTrack.Position = UDim2.new(0.5, -130, 0.5, 44)
+	barTrack.BackgroundColor3 = Config.track
+	barTrack.BorderSizePixel = 0
+	barTrack.ZIndex = 4
+	barTrack.Parent = root
+	createCorner(barTrack, 999)
+
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.new(0, 0, 1, 0)
+	fill.BackgroundColor3 = WHITE
+	fill.BorderSizePixel = 0
+	fill.ZIndex = 5
+	fill.Parent = barTrack
+	createCorner(fill, 999)
+	local fillGradient = createGradient(fill, 0, accentSequence())
+
+	local percent = makeLabel(root, "0%", UDim2.new(0, 260, 0, 14), UDim2.new(0.5, -130, 0.5, 58), Config.font, 10, Config.muted, Enum.TextXAlignment.Center)
+
+	Loading.gui = gui
+	Loading.root = root
+	Loading.logo = logo
+	Loading.stepLabel = stepLabel
+
+	-- [แก้] ขับ progress ด้วย Heartbeat (ไม่ใช้ task.spawn loop) ลื่นเท่าเฟรมเรต
+	Loading.connection = runService.Heartbeat:Connect(function(dt)
+		local diff = Loading.targetProgress - Loading.progress
+		Loading.progress = Loading.progress + diff * math.min(dt * 6, 1)
+
+		fill.Size = UDim2.new(math.clamp(Loading.progress, 0, 1), 0, 1, 0)
+		percent.Text = string.format("%d%%", math.floor(Loading.progress * 100 + 0.5))
+
+		local now = os.clock()
+		logoScale.Scale = 1 + math.sin(now * 3) * 0.04
+		fillGradient.Offset = Vector2.new(math.sin(now * 2) * 0.25, 0)
+	end)
+
+	tween(root, 0.3, { GroupTransparency = 0 })
+end
+
+---อัปเดตข้อความและเป้าหมาย progress
+local function setStep(text, progress)
+	if not Loading.gui then
+		return
+	end
+
+	Loading.stepLabel.Text = text
+	Loading.targetProgress = progress
+end
+
+---ลบหน้าโหลดทันที ใช้ตอน detach / error
+local function cleanupLoading()
+	if Loading.connection then
+		Loading.connection:Disconnect()
+		Loading.connection = nil
+	end
+
+	if Loading.gui then
+		pcall(function()
+			Loading.gui:Destroy()
+		end)
+		Loading.gui = nil
+	end
+
+	Loading.root = nil
+end
+
+---รอ bar ถึง 100% แล้ว fade out
+local function destroyLoadingScreen()
+	if not Loading.gui then
+		return
+	end
+
+	Loading.targetProgress = 1
+
+	task.spawn(function()
+		local deadline = os.clock() + 1
+
+		while Loading.progress < 0.97 and os.clock() < deadline do
+			task.wait()
+		end
+
+		if Loading.root then
+			tween(Loading.root, 0.4, { GroupTransparency = 1 })
+		end
+
+		task.wait(0.45)
+		cleanupLoading()
+	end)
+end
+
 local function makeCard(parent, size, position)
 	local card = Instance.new("Frame")
 	card.Size = size
@@ -1810,7 +2008,8 @@ end
 ---Build the whole interface.
 local function buildUI()
 	local parent = safeParent()
-	local logo = resolveLogo()
+	-- [แก้] ใช้โลโก้ปัจจุบัน (fallback หรือแคช) ไม่ request ที่นี่แล้ว
+	local logo = currentLogo
 
 	local gui = Instance.new("ScreenGui")
 	gui.Name = randomName()
@@ -1842,7 +2041,8 @@ local function buildUI()
 	miniScale.Scale = 0
 	miniScale.Parent = miniBtn
 
-	makeIcon(miniBtn, logo, UDim2.new(1, -12, 1, -12), UDim2.new(0, 6, 0, 6))
+	-- [แก้] ลงทะเบียนโลโก้ เพื่อให้สลับรูปทีหลังได้
+	registerLogo(makeIcon(miniBtn, logo, UDim2.new(1, -12, 1, -12), UDim2.new(0, 6, 0, 6)))
 
 	-- Scale the window to fit any screen (phone, tablet, pc).
 	local function getBaseScale()
@@ -1895,7 +2095,7 @@ local function buildUI()
 	createGradient(sidebar, 90, ColorSequence.new(Config.sidebarTop, Config.sidebarBot))
 
 	-- Big logo with no background while the window is open.
-	local sidebarLogo = makeIcon(sidebar, logo, UDim2.new(0, 68, 0, 68), UDim2.new(0, 12, 0, 4), WHITE)
+	local sidebarLogo = registerLogo(makeIcon(sidebar, logo, UDim2.new(0, 68, 0, 68), UDim2.new(0, 12, 0, 4), WHITE))
 	sidebarLogo.ScaleType = Enum.ScaleType.Fit
 	sidebarLogo.ZIndex = 3
 
@@ -2589,6 +2789,9 @@ end
 function AxionHub.detach()
 	AxionHub.alive = false
 
+	-- [แก้] ลบหน้าโหลดด้วย ถ้ายังค้างอยู่
+	cleanupLoading()
+
 	pcall(stopDice)
 	pcall(stopCollect)
 	pcall(stopQuest)
@@ -2648,6 +2851,34 @@ local function initializeScript()
 	local okFps, fps = pcall(getfpscap)
 	State.origFps = okFps and tonumber(fps) or 60
 
+	-- [แก้] แสดงหน้าโหลดทันที ใช้โลโก้จากแคชหรือ fallback
+	local cachedLogo = resolveCachedLogo()
+	currentLogo = cachedLogo or Icons.Logo
+	createLoadingScreen()
+	setStep("Starting...", 0.05)
+
+	-- [แก้] รอให้เฟรมแรกวาดก่อน ค่อยเริ่มงานที่อาจบล็อก
+	runService.Heartbeat:Wait()
+	runService.Heartbeat:Wait()
+
+	-- [แก้] ไอคอนโหลดใน thread แยก
+	local iconsDone = false
+	task.spawn(function()
+		pcall(loadIconLibrary)
+		iconsDone = true
+	end)
+
+	-- [แก้] โลโก้ไม่มีแคช: โหลดเบื้องหลังแล้วค่อยสลับ
+	if not cachedLogo then
+		task.spawn(function()
+			local asset = resolveLogo()
+			if AxionHub.alive and asset ~= Icons.Logo then
+				setLogo(asset)
+			end
+		end)
+	end
+
+	setStep("Loading features...", 0.3)
 	initAntiFX()
 
 	task.spawn(function()
@@ -2659,11 +2890,37 @@ local function initializeScript()
 
 	track(runService.Heartbeat:Connect(onHeartbeat))
 
-	if Remotes.rollMessage then
+	-- [แก้] remotes: เช็คทันทีหนึ่งรอบ ที่เหลือ poll เบื้องหลัง
+	setStep("Finding remotes...", 0.45)
+	resolveRemotes()
+
+	local rollMessageHooked = false
+	local function hookRollMessage()
+		if rollMessageHooked or not Remotes.rollMessage then
+			return
+		end
+
+		rollMessageHooked = true
 		track(Remotes.rollMessage.OnClientEvent:Connect(function()
 			State.lastActivity = os.clock()
 		end))
 	end
+
+	hookRollMessage()
+
+	task.spawn(function()
+		local deadline = os.clock() + REMOTE_WAIT
+
+		while AxionHub.alive and os.clock() < deadline do
+			if resolveRemotes() then
+				break
+			end
+
+			task.wait(0.5)
+		end
+
+		hookRollMessage()
+	end)
 
 	-- Resume collecting after respawn.
 	track(localPlayer.CharacterAdded:Connect(function()
@@ -2673,17 +2930,35 @@ local function initializeScript()
 		end
 	end))
 
+	setStep("Enabling protection...", 0.6)
+
 	for _, step in ipairs({ initAntiAfk, initReconnect, installAntiKick }) do
 		pcall(step)
 	end
 
 	task.spawn(watchdogLoop)
 
+	-- [แก้] รอไอคอนไม่เกิน ICON_WAIT วิ (thread นี้ yield หน้าโหลดจึงขยับต่อ)
+	setStep("Loading icons...", 0.7)
+
+	local iconDeadline = os.clock() + ICON_WAIT
+	while not iconsDone and os.clock() < iconDeadline do
+		task.wait(0.05)
+	end
+
+	applyIconNames()
+
 	-- The toggle is built from the saved value, the loop starts after the ui exists.
 	local resumeQuest = State.autoQuest
 	State.autoQuest = false
 
+	setStep("Building UI...", 0.85)
+	task.wait()
+
 	buildUI()
+
+	setStep("Ready", 1)
+	destroyLoadingScreen()
 
 	if State.lowPower then
 		applyLowPower(true)
@@ -2701,12 +2976,26 @@ local function initializeScript()
 				return
 			end
 
+			-- [แก้] รอ remotes พร้อมก่อน resume
+			local function waitFor(condition)
+				local deadline = os.clock() + REMOTE_WAIT
+				while AxionHub.alive and not condition() and os.clock() < deadline do
+					task.wait(0.5)
+				end
+			end
+
 			if State.resumeRoll then
+				waitFor(function()
+					return remotesReady
+				end)
 				startDice()
 				uiRefs.autoRoll.set(State.running)
 			end
 
 			if State.resumeCollect then
+				waitFor(function()
+					return collectReady
+				end)
 				startCollect()
 				uiRefs.collect.set(State.autoCollect)
 			end
