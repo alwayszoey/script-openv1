@@ -38,6 +38,8 @@ local runService = game:GetService("RunService")
 local lighting = game:GetService("Lighting")
 local coreGui = game:GetService("CoreGui")
 local soundService = game:GetService("SoundService")
+local marketplaceService = game:GetService("MarketplaceService")
+local statsService = game:GetService("Stats")
 
 local localPlayer = playersService.LocalPlayer
 local WHITE = Color3.new(1, 1, 1)
@@ -172,6 +174,35 @@ local function createGradient(parent, rotation, colorSequence)
 	return gradient
 end
 
+local function getGreeting(hour)
+	if hour >= 5 and hour < 12 then
+		return "Good morning"
+	end
+	if hour >= 12 and hour < 18 then
+		return "Good afternoon"
+	end
+	return "Good evening"
+end
+
+local function formatUptime(seconds)
+	seconds = math.floor(seconds)
+	return string.format("%02d:%02d:%02d", seconds // 3600, (seconds % 3600) // 60, seconds % 60)
+end
+
+local function getPing()
+	local ok, value = pcall(function()
+		return statsService.Network.ServerStatsItem["Data Ping"]:GetValue()
+	end)
+	if ok and type(value) == "number" then
+		return value
+	end
+
+	local okPing, ping = pcall(function()
+		return localPlayer:GetNetworkPing() * 1000
+	end)
+	return okPing and ping or 0
+end
+
 -- Register extra icons into the resolver, e.g.:
 --   AxionLib.RegisterIcons({ myIcon = "rbxassetid://123", gear = 456 })
 -- Names are matched case-insensitively wherever a component takes an icon.
@@ -268,7 +299,16 @@ function AxionLib.new(options)
 	self.pageButtons = {}
 	self.activePage = nil
 
-	self:_buildShell(options.Tabs or {})
+	-- If Home options are given, build the shell with no tabs yet so the
+	-- bundled Home page can be inserted first, then append any custom tabs.
+	self:_buildShell(options.Home and {} or (options.Tabs or {}))
+
+	if options.Home then
+		self:AddHomePage(options.Home)
+		for _, tab in ipairs(options.Tabs or {}) do
+			self:AddTab(tab)
+		end
+	end
 
 	return self
 end
@@ -775,6 +815,24 @@ function AxionLib:_buildShell(tabs)
 	content.Parent = win
 	self.content = content
 
+	-- Persistent top bar for minimize/close: pages render BELOW this, so
+	-- a page's own content never has to leave a manual gap for it.
+	local TOP_BAR_HEIGHT = 38
+	local topBar = Instance.new("Frame")
+	topBar.Size = UDim2.new(1, 0, 0, TOP_BAR_HEIGHT)
+	topBar.BackgroundTransparency = 1
+	topBar.ZIndex = 10
+	topBar.Parent = content
+	self.topBar = topBar
+
+	local pagesContainer = Instance.new("Frame")
+	pagesContainer.Size = UDim2.new(1, 0, 1, -TOP_BAR_HEIGHT)
+	pagesContainer.Position = UDim2.new(0, 0, 0, TOP_BAR_HEIGHT)
+	pagesContainer.BackgroundTransparency = 1
+	pagesContainer.BorderSizePixel = 0
+	pagesContainer.Parent = content
+	self.pagesContainer = pagesContainer
+
 	-- tabs
 	for index, tab in ipairs(tabs) do
 		self:_addTabButton(sidebar, index, tab)
@@ -806,28 +864,21 @@ function AxionLib:_buildShell(tabs)
 
 	self._toast = { frame = toast, stroke = toastStroke, label = toastLabel, icon = toastIcon, token = 0, restY = self.windowSize.Y.Offset + 10, showY = self.windowSize.Y.Offset - 38 }
 
-	-- top-right minimize/close buttons
-	local topButtons = Instance.new("Frame")
-	topButtons.Size = UDim2.new(0, 54, 0, 22)
-	topButtons.Position = UDim2.new(1, -68, 0, 26)
-	topButtons.BackgroundTransparency = 1
-	topButtons.ZIndex = 10
-	topButtons.Parent = content
-
-	local minChip = self:Chip(topButtons, UDim2.new(0, 22, 0, 22), UDim2.new(0, 0, 0, 0), "", 13, 999)
+	-- Minimize/close buttons live in the top bar, not over page content.
+	local minChip = self:Chip(topBar, UDim2.new(0, 22, 0, 22), UDim2.new(1, -68, 0, 8), "", 13, 999)
 	minChip.button.ZIndex = 11
 	self:Icon(minChip.button, "minimize", UDim2.new(0, 12, 0, 12), UDim2.new(0.5, -6, 0.5, -6), theme.text).ZIndex = 12
 	minChip.setOn(false, true)
 
 	local closeBtn = Instance.new("TextButton")
 	closeBtn.Size = UDim2.new(0, 22, 0, 22)
-	closeBtn.Position = UDim2.new(0, 32, 0, 0)
+	closeBtn.Position = UDim2.new(1, -36, 0, 8)
 	closeBtn.BackgroundColor3 = Color3.fromRGB(120, 32, 62)
 	closeBtn.BorderSizePixel = 0
 	closeBtn.Text = ""
 	closeBtn.AutoButtonColor = false
 	closeBtn.ZIndex = 11
-	closeBtn.Parent = topButtons
+	closeBtn.Parent = topBar
 	createCorner(closeBtn, 999)
 	self:Icon(closeBtn, "close", UDim2.new(0, 12, 0, 12), UDim2.new(0.5, -6, 0.5, -6), theme.text).ZIndex = 12
 
@@ -951,7 +1002,9 @@ function AxionLib:_buildShell(tabs)
 		end))
 	end
 
+	self._frameCount = 0
 	self:_track(runService.Heartbeat:Connect(function()
+		self._frameCount = self._frameCount + 1
 		local now = os.clock()
 		for _, spinner in ipairs(self.spinners) do
 			spinner.gradient.Rotation = (spinner.offset + now * spinner.speed) % 360
@@ -994,7 +1047,7 @@ function AxionLib:_addTabButton(sidebar, index, tab)
 	})
 	descLabel.ZIndex = 6
 
-	local page = self:Page(self.content)
+	local page = self:Page(self.pagesContainer)
 	self.pages[tab.Id] = page
 	self.pageButtons[tab.Id] = { button = chip.button, chip = chip, name = nameLabel, desc = descLabel }
 
@@ -1062,6 +1115,236 @@ end
 function AxionLib:SetLogo(image)
 	self.logo = resolveIcon(image, self.logo)
 	self.logoLabel.Image = self.logo
+end
+
+-- Ready-made "Home" page: greeting/clock header, optional game-info card,
+-- optional system/performance card (uptime, FPS, ping, FPS graph), and an
+-- optional quick-actions row. All game-specific behaviour (teleporting,
+-- rejoining, etc.) is up to you — this just lays out the UI and calls the
+-- actions you give it.
+--
+-- options:
+--   Id, Icon, Label, Desc     tab fields, same as AddTab (defaults to Home tab)
+--   HeaderIcon                icon shown in the greeting card
+--   ShowGameInfo              boolean, default true
+--   ShowPerformance           boolean, default true
+--   Actions                   array of { Label, Icon, Width, Callback }
+function AxionLib:AddHomePage(options)
+	options = options or {}
+	local theme = self.theme
+
+	local page = self:AddTab({
+		Id = options.Id or "HOME",
+		Icon = options.Icon or "home",
+		Label = options.Label or "Home",
+		Desc = options.Desc or "overview",
+	})
+
+	local y = 16
+
+	local header = self:Card(page, UDim2.new(1, -36, 0, 50), UDim2.new(0, 18, 0, y))
+	self:Icon(header, options.HeaderIcon or "home", UDim2.new(0, 20, 0, 20), UDim2.new(0, 14, 0.5, -10), theme.accentLight)
+
+	local greetingLabel = self:Label(header, "", UDim2.new(0, 150, 0, 14), UDim2.new(0, 44, 0, 8), { textSize = 10, color = theme.accentLight })
+	local nameLabel = self:Label(header, localPlayer.Name, UDim2.new(0, 150, 0, 20), UDim2.new(0, 44, 0, 22), { font = theme.fontBold, textSize = 14 })
+	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+
+	local timeLabel = self:Label(header, "", UDim2.new(0, 92, 0, 18), UDim2.new(1, -104, 0, 8), { font = theme.fontBold, textSize = 15, alignment = Enum.TextXAlignment.Right })
+	local dateLabel = self:Label(header, "", UDim2.new(0, 92, 0, 12), UDim2.new(1, -104, 0, 28), { textSize = 9, color = theme.muted, alignment = Enum.TextXAlignment.Right })
+
+	y = y + 60
+
+	local playersLabel
+	if options.ShowGameInfo ~= false then
+		local gameCard = self:Card(page, UDim2.new(1, -36, 0, 76), UDim2.new(0, 18, 0, y))
+		local gameThumb = game.GameId ~= 0 and string.format("rbxthumb://type=GameIcon&id=%d&w=420&h=420", game.GameId) or "home"
+
+		local gameIcon = self:Icon(gameCard, gameThumb, UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), WHITE)
+		gameIcon.ScaleType = Enum.ScaleType.Crop
+		gameIcon.ImageTransparency = 0.72
+		gameIcon.ZIndex = 4
+		createCorner(gameIcon, self.cornerRadius)
+
+		local gameShade = Instance.new("Frame")
+		gameShade.Size = UDim2.new(1, 0, 1, 0)
+		gameShade.BackgroundColor3 = Color3.new(0, 0, 0)
+		gameShade.BorderSizePixel = 0
+		gameShade.ZIndex = 5
+		gameShade.Parent = gameCard
+		createCorner(gameShade, self.cornerRadius)
+		local shadeGradient = Instance.new("UIGradient")
+		shadeGradient.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.1),
+			NumberSequenceKeypoint.new(1, 0.55),
+		})
+		shadeGradient.Parent = gameShade
+
+		local smallIcon = self:Icon(gameCard, gameThumb, UDim2.new(0, 56, 0, 56), UDim2.new(0, 10, 0.5, -28), WHITE)
+		smallIcon.ScaleType = Enum.ScaleType.Crop
+		smallIcon.ZIndex = 7
+		createCorner(smallIcon, 10)
+		self:Stroke(smallIcon, 1, 0.5)
+
+		local gameNameLabel = self:Label(gameCard, "Loading...", UDim2.new(1, -90, 0, 18), UDim2.new(0, 76, 0, 10), { font = theme.fontBold, textSize = 14 })
+		gameNameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+
+		local placeLabel = self:Label(gameCard, "Place ID  " .. game.PlaceId, UDim2.new(1, -90, 0, 12), UDim2.new(0, 76, 0, 32), { font = theme.fontMedium, textSize = 10, color = theme.textDim })
+
+		self:Icon(gameCard, "users", UDim2.new(0, 12, 0, 12), UDim2.new(0, 76, 0, 51), theme.good).ZIndex = 7
+		playersLabel = self:Label(gameCard, "", UDim2.new(1, -110, 0, 12), UDim2.new(0, 94, 0, 51), { font = theme.fontMedium, textSize = 10, color = theme.good })
+
+		for _, label in ipairs({ gameNameLabel, placeLabel, playersLabel }) do
+			label.ZIndex = 7
+			label.TextStrokeTransparency = 0.75
+		end
+
+		task.spawn(function()
+			local ok, info = pcall(function()
+				return marketplaceService:GetProductInfo(game.PlaceId)
+			end)
+			if not self.alive then
+				return
+			end
+			gameNameLabel.Text = (ok and type(info) == "table" and info.Name) or "Unknown game"
+		end)
+
+		y = y + 86
+	end
+
+	local fpsValue, pingValue, uptimeValue, pushFps, fpsColorFn
+	if options.ShowPerformance ~= false then
+		local perfCard = self:Card(page, UDim2.new(1, -36, 0, 150), UDim2.new(0, 18, 0, y))
+
+		self:Label(perfCard, "SYSTEM & PERFORMANCE", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8), { font = theme.fontBold, textSize = 9.5, color = theme.accentLight })
+
+		local function stat(x, label)
+			local box = Instance.new("Frame")
+			box.Size = UDim2.new(0, 120, 0, 36)
+			box.Position = UDim2.new(0, x, 0, 28)
+			box.BackgroundTransparency = 1
+			box.Parent = perfCard
+			self:Label(box, label, UDim2.new(1, 0, 0, 12), UDim2.new(0, 0, 0, 0), { textSize = 9, color = theme.muted })
+			return self:Label(box, "--", UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 14), { font = theme.fontBold, textSize = 13 })
+		end
+
+		uptimeValue = stat(14, "UPTIME")
+		fpsValue = stat(144, "FPS")
+		pingValue = stat(274, "PING")
+
+		self:Label(perfCard, "FPS", UDim2.new(1, -28, 0, 12), UDim2.new(0, 14, 0, 70), { textSize = 9, color = theme.muted })
+
+		local graph = Instance.new("Frame")
+		graph.Size = UDim2.new(1, -28, 0, 46)
+		graph.Position = UDim2.new(0, 14, 0, 86)
+		graph.BackgroundTransparency = 1
+		graph.Parent = perfCard
+
+		local GRAPH_BARS = 36
+		local bars, history = {}, {}
+		for index = 1, GRAPH_BARS do
+			local bar = Instance.new("Frame")
+			bar.AnchorPoint = Vector2.new(0, 1)
+			bar.Position = UDim2.new((index - 1) / GRAPH_BARS, 0, 1, 0)
+			bar.Size = UDim2.new(1 / GRAPH_BARS, -1, 0, 0)
+			bar.BackgroundColor3 = theme.good
+			bar.BorderSizePixel = 0
+			bar.ZIndex = 5
+			bar.Parent = graph
+			createCorner(bar, 2)
+			bars[index] = bar
+			history[index] = 0
+		end
+
+		fpsColorFn = function(value)
+			if value >= 50 then
+				return theme.good
+			end
+			if value >= 30 then
+				return theme.accentLight
+			end
+			return theme.bad
+		end
+
+		pushFps = function(fps)
+			table.remove(history, 1)
+			table.insert(history, fps)
+			local peak = 60
+			for _, value in ipairs(history) do
+				peak = math.max(peak, value)
+			end
+			for index, bar in ipairs(bars) do
+				local value = history[index]
+				local height = math.clamp(value / peak * 38, value > 0 and 2 or 0, 38)
+				bar.Size = UDim2.new(1 / GRAPH_BARS, -1, 0, height)
+				bar.BackgroundColor3 = fpsColorFn(value)
+			end
+		end
+
+		y = y + 160
+	end
+
+	if options.Actions and #options.Actions > 0 then
+		local actionsCard = self:Card(page, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, y))
+		self:Label(actionsCard, "QUICK ACTIONS", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 6), { font = theme.fontBold, textSize = 9.5, color = theme.accentLight })
+
+		local x = 14
+		for _, action in ipairs(options.Actions) do
+			local width = action.Width or 100
+			self:ActionChip(actionsCard, UDim2.new(0, x, 0, 24), width, action.Label, action.Icon, action.Callback)
+			x = x + width + 12
+		end
+	end
+
+	local startClock = os.clock()
+
+	local function refresh(fps)
+		local now = os.date("*t")
+		greetingLabel.Text = getGreeting(now.hour)
+		timeLabel.Text = os.date("%H:%M")
+		dateLabel.Text = os.date("%a, %d %b")
+
+		if playersLabel then
+			playersLabel.Text = string.format("%d / %d players", #playersService:GetPlayers(), playersService.MaxPlayers)
+		end
+
+		if uptimeValue then
+			uptimeValue.Text = formatUptime(os.clock() - startClock)
+		end
+
+		if pingValue then
+			local ping = getPing()
+			pingValue.Text = string.format("%d ms", math.floor(ping + 0.5))
+			pingValue.TextColor3 = ping < 100 and theme.good or (ping < 200 and theme.text or theme.bad)
+		end
+
+		if fps and fpsValue then
+			fpsValue.Text = tostring(math.floor(fps + 0.5))
+			fpsValue.TextColor3 = fpsColorFn(fps)
+			pushFps(fps)
+		end
+	end
+
+	refresh()
+
+	task.spawn(function()
+		local lastFrames = self._frameCount or 0
+		local lastClock = os.clock()
+
+		while self.alive and page.Parent do
+			task.wait(0.5)
+
+			local now = os.clock()
+			local fps = ((self._frameCount or 0) - lastFrames) / math.max(now - lastClock, 0.001)
+			lastFrames = self._frameCount or 0
+			lastClock = now
+
+			if not self.minimized then
+				refresh(fps)
+			end
+		end
+	end)
+
+	return page
 end
 
 function AxionLib:Notify(text, color)
