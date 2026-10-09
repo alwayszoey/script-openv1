@@ -17,7 +17,7 @@ local AxionHub = {
 }
 
 -- Constants.
-local HUB_VERSION = "v18"
+local HUB_VERSION = "v19"
 local WHITE = Color3.new(1, 1, 1)
 local SIDEBAR_WIDTH = 150
 local CORNER_RADIUS = 12
@@ -26,6 +26,7 @@ local CONFIG_FILE = "AxionHub/config.json"
 local RELOAD_FILE = "AxionHub.lua"
 local LOGO_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/Untitled27_20261009042444.png"
 local LOGO_FILE = "AxionHub/logo.png"
+local ICONS_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/dist/Icons.lua"
 local SAFE_MAX_RATE = 30
 local WATCHDOG_TIMEOUT = 90
 local IDLE_PULSE_MIN = 90
@@ -47,6 +48,7 @@ local PERSIST_KEYS = {
 	"uiSound",
 }
 
+-- Default icons, used when the icon library is missing a name.
 local Icons = {
 	Logo = "rbxassetid://10709819149",
 	Search = "rbxassetid://10734943674",
@@ -71,6 +73,86 @@ local Icons = {
 	Check = "rbxassetid://10709790644",
 	Zap = "rbxassetid://10709791882",
 }
+
+-- Icon library.
+local rawIcons = {}
+
+---Download and load the icon table through request.
+local function loadIconLibrary()
+	local ok, response = pcall(request, { Url = ICONS_URL, Method = "GET" })
+	if not ok or not response or not response.Success then
+		return
+	end
+
+	local chunk = loadstring(response.Body)
+	if not chunk then
+		return
+	end
+
+	local loaded, data = pcall(chunk)
+	if loaded and type(data) == "table" then
+		rawIcons = data
+	end
+end
+
+---Accept an asset id, a url, or an icon name from the library.
+---@param input string|number
+---@param fallback string?
+---@return string
+local function getIcon(input, fallback)
+	if type(input) == "number" then
+		return "rbxassetid://" .. input
+	end
+
+	if type(input) ~= "string" or input == "" then
+		return fallback or ""
+	end
+
+	if input:find("rbxassetid://", 1, true) or input:find("http", 1, true) then
+		return input
+	end
+
+	local found = rawIcons[input:lower()]
+
+	if type(found) == "number" then
+		return "rbxassetid://" .. found
+	end
+
+	if type(found) == "string" and found ~= "" then
+		return found
+	end
+
+	return fallback or input
+end
+
+pcall(loadIconLibrary)
+
+-- Names in the library for each default icon. Missing names keep the default id.
+local ICON_NAMES = {
+	Dashboard = "layout-dashboard",
+	Settings = "settings",
+	Server = "server",
+	Sound = "volume-2",
+	SoundMute = "volume-x",
+	Bell = "bell",
+	Check = "check",
+	Close = "x",
+	Minimize = "minus",
+	Copy = "copy",
+	Refresh = "refresh-cw",
+	Zap = "zap",
+	Skull = "skull",
+	Save = "save",
+	Teleport = "map-pin",
+	Visuals = "eye",
+	Combat = "shield",
+	Palette = "palette",
+	Info = "info",
+}
+
+for key, name in pairs(ICON_NAMES) do
+	Icons[key] = getIcon(name, Icons[key])
+end
 
 local BubbleSoundMap = {
 	Click = { id = "rbxassetid://6895079853", pitch = 1.10, vol = 0.32 },
@@ -842,12 +924,12 @@ local function createStroke(parent, thickness, transparency)
 	return stroke, gradient
 end
 
----Image icon used across the interface.
+---Image icon used across the interface. Accepts an id, url, or library name.
 local function makeIcon(parent, image, size, position, color)
 	local icon = Instance.new("ImageLabel")
 	icon.Size = size
 	icon.Position = position
-	icon.Image = image
+	icon.Image = getIcon(image)
 	icon.ImageColor3 = color or WHITE
 	icon.BackgroundTransparency = 1
 	icon.BorderSizePixel = 0
@@ -1054,6 +1136,7 @@ local function stylePill(parts, on, instant)
 	tween(parts.knob, 0.3, knobGoal, Enum.EasingStyle.Back)
 end
 
+---Toggle row. iconImage can be an asset id, a url, or an icon name.
 local function makeToggle(parent, y, title, defaultOn, callback, iconImage)
 	local row = Instance.new("Frame")
 	row.Size = UDim2.new(1, 0, 0, 40)
@@ -1063,11 +1146,12 @@ local function makeToggle(parent, y, title, defaultOn, callback, iconImage)
 	row.Parent = parent
 
 	local icon
-	if iconImage then
-		icon = makeIcon(row, iconImage, UDim2.new(0, 18, 0, 18), UDim2.new(0, 14, 0.5, -9), Config.accentLight)
+	local resolvedIcon = iconImage and getIcon(iconImage) or nil
+	if resolvedIcon and resolvedIcon ~= "" then
+		icon = makeIcon(row, resolvedIcon, UDim2.new(0, 18, 0, 18), UDim2.new(0, 14, 0.5, -9), Config.accentLight)
 	end
 
-	makeLabel(row, title, UDim2.new(0.7, 0, 1, 0), UDim2.new(0, iconImage and 40 or 14, 0, 0), Config.fontMedium, 12, Config.text)
+	makeLabel(row, title, UDim2.new(0.7, 0, 1, 0), UDim2.new(0, icon and 40 or 14, 0, 0), Config.fontMedium, 12, Config.text)
 
 	local parts = buildPill(row, UDim2.new(1, -60, 0.5, -12))
 	local on = defaultOn
@@ -1273,7 +1357,7 @@ local function buildUI()
 
 		toastLabel.Text = text
 		toastLabel.TextColor3 = color or Config.text
-		toastIcon.Image = color == Config.good and Icons.Check or Icons.Bell
+		toastIcon.Image = getIcon(color == Config.good and Icons.Check or Icons.Bell)
 		toast.Position = UDim2.new(0.5, 0, 0, 420)
 
 		tween(toast, 0.35, { Position = UDim2.new(0.5, 0, 0, 372), BackgroundTransparency = 0.1 }, Enum.EasingStyle.Back)
@@ -1505,7 +1589,7 @@ local function buildUI()
 	local soundToggle
 	soundToggle = makeToggle(settingsCard, 92, "UI Sounds", State.uiSound, function(value)
 		State.uiSound = value
-		soundToggle.icon.Image = value and Icons.Sound or Icons.SoundMute
+		soundToggle.icon.Image = getIcon(value and Icons.Sound or Icons.SoundMute)
 		saveConfig()
 	end, State.uiSound and Icons.Sound or Icons.SoundMute)
 
