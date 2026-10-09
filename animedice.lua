@@ -17,7 +17,7 @@ local AxionHub = {
 }
 
 -- Constants.
-local HUB_VERSION = "v19"
+local HUB_VERSION = "v20"
 local WHITE = Color3.new(1, 1, 1)
 local SIDEBAR_WIDTH = 150
 local CORNER_RADIUS = 12
@@ -27,6 +27,8 @@ local RELOAD_FILE = "AxionHub.lua"
 local LOGO_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/Untitled27_20261009042444.png"
 local LOGO_FILE = "AxionHub/logo.png"
 local ICONS_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/dist/Icons.lua"
+local DISCORD_URL = "https://discord.gg/yourinvite"
+local GRAPH_BARS = 48
 local SAFE_MAX_RATE = 30
 local WATCHDOG_TIMEOUT = 90
 local IDLE_PULSE_MIN = 90
@@ -72,6 +74,11 @@ local Icons = {
 	Info = "rbxassetid://10709752996",
 	Check = "rbxassetid://10709790644",
 	Zap = "rbxassetid://10709791882",
+	Home = "rbxassetid://10723407389",
+	Users = "rbxassetid://10709818534",
+	Gamepad = "rbxassetid://10709818534",
+	Hop = "rbxassetid://10723404337",
+	Link = "rbxassetid://10709812159",
 }
 
 -- Icon library.
@@ -148,6 +155,11 @@ local ICON_NAMES = {
 	Combat = "shield",
 	Palette = "palette",
 	Info = "info",
+	Home = "home",
+	Users = "users",
+	Gamepad = "gamepad-2",
+	Hop = "shuffle",
+	Link = "link",
 }
 
 for key, name in pairs(ICON_NAMES) do
@@ -180,6 +192,8 @@ local httpService = cloneRef(game:GetService("HttpService"))
 local virtualUser = cloneRef(game:GetService("VirtualUser"))
 local coreGui = cloneRef(game:GetService("CoreGui"))
 local soundService = cloneRef(game:GetService("SoundService"))
+local marketplaceService = cloneRef(game:GetService("MarketplaceService"))
+local statsService = cloneRef(game:GetService("Stats"))
 
 local localPlayer = playersService.LocalPlayer
 
@@ -220,7 +234,7 @@ local MODE_INFO = {
 }
 
 local State = {
-	page = "MAIN",
+	page = "HOME",
 	mode = "AUTO",
 	running = false,
 	rolls = 0,
@@ -260,6 +274,10 @@ local State = {
 
 	minimized = false,
 	animating = false,
+
+	-- Home page.
+	frameCount = 0,
+	hopping = false,
 }
 
 -- Filled by buildUI so logic code can reach the interface.
@@ -878,6 +896,151 @@ local function installAntiKick()
 	end
 end
 
+-- Home page logic.
+
+---Greeting that follows the local hour.
+---@param hour number
+---@return string
+local function getGreeting(hour)
+	if hour >= 5 and hour < 12 then
+		return "Good morning"
+	end
+
+	if hour >= 12 and hour < 18 then
+		return "Good afternoon"
+	end
+
+	return "Good evening"
+end
+
+---Current ping in milliseconds.
+---@return number
+local function getPing()
+	local ok, value = pcall(function()
+		return statsService.Network.ServerStatsItem["Data Ping"]:GetValue()
+	end)
+
+	if ok and type(value) == "number" then
+		return value
+	end
+
+	local okPing, ping = pcall(function()
+		return localPlayer:GetNetworkPing() * 2000
+	end)
+
+	return okPing and ping or 0
+end
+
+---Teleport to a random public server that is not full.
+local function serverHop()
+	if State.hopping then
+		return
+	end
+
+	State.hopping = true
+	notify("Searching for a server...", Config.muted)
+
+	task.spawn(function()
+		local target
+		local cursor
+
+		for _ = 1, 3 do
+			local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100", game.PlaceId)
+			if cursor then
+				url = url .. "&cursor=" .. cursor
+			end
+
+			local ok, response = pcall(request, { Url = url, Method = "GET" })
+			if not ok or not response or not response.Success then
+				break
+			end
+
+			local decoded, data = pcall(function()
+				return httpService:JSONDecode(response.Body)
+			end)
+			if not decoded or type(data) ~= "table" or type(data.data) ~= "table" then
+				break
+			end
+
+			local candidates = {}
+			for _, server in ipairs(data.data) do
+				if server.id ~= game.JobId and server.playing and server.maxPlayers and server.playing < server.maxPlayers then
+					table.insert(candidates, server)
+				end
+			end
+
+			if #candidates > 0 then
+				target = candidates[math.random(1, #candidates)]
+				break
+			end
+
+			cursor = data.nextPageCursor
+			if not cursor then
+				break
+			end
+		end
+
+		if not target then
+			State.hopping = false
+			notify("No server found", Config.bad)
+			return
+		end
+
+		-- Save first so auto resume works after the hop.
+		saveConfig()
+		notify("Hopping server...", Config.good)
+
+		local ok = pcall(function()
+			teleportService:TeleportToPlaceInstance(game.PlaceId, target.id, localPlayer)
+		end)
+
+		if not ok then
+			notify("Teleport failed", Config.bad)
+		end
+
+		task.delay(10, function()
+			State.hopping = false
+		end)
+	end)
+end
+
+---Join the same server again, or the place if the server is empty.
+local function rejoinServer()
+	if State.hopping then
+		return
+	end
+
+	State.hopping = true
+	saveConfig()
+	notify("Rejoining...", Config.good)
+
+	local ok = pcall(function()
+		if #playersService:GetPlayers() <= 1 then
+			teleportService:Teleport(game.PlaceId, localPlayer)
+		else
+			teleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, localPlayer)
+		end
+	end)
+
+	if not ok then
+		notify("Rejoin failed", Config.bad)
+	end
+
+	task.delay(10, function()
+		State.hopping = false
+	end)
+end
+
+local function copyDiscord()
+	if not setclipboard then
+		notify("Clipboard not supported", Config.bad)
+		return
+	end
+
+	setclipboard(DISCORD_URL)
+	notify("Copied Discord link", Config.good)
+end
+
 -- UI helpers.
 
 local function tween(object, duration, goal, style, direction)
@@ -1175,6 +1338,227 @@ local function makeToggle(parent, y, title, defaultOn, callback, iconImage)
 	}
 end
 
+---Home page: greeting, current game, system stats and quick actions.
+---@param page Frame
+---@return Frame
+local function buildHomePage(page)
+	-- Header with greeting and compact date / time.
+	local homeHeader = makeCard(page, UDim2.new(1, -90, 0, 50), UDim2.new(0, 18, 0, 16))
+
+	makeIcon(homeHeader, Icons.Home, UDim2.new(0, 20, 0, 20), UDim2.new(0, 14, 0.5, -10), Config.accentLight)
+
+	local greetingLabel = makeLabel(homeHeader, "", UDim2.new(0, 180, 0, 14), UDim2.new(0, 44, 0, 8), Config.font, 10, Config.accentLight)
+	local playerLabel = makeLabel(homeHeader, localPlayer.Name, UDim2.new(0, 180, 0, 20), UDim2.new(0, 44, 0, 22), Config.fontBold, 14, Config.text)
+	playerLabel.TextTruncate = Enum.TextTruncate.AtEnd
+
+	local timeLabel = makeLabel(homeHeader, "", UDim2.new(0, 100, 0, 18), UDim2.new(1, -114, 0, 8), Config.fontBold, 15, Config.text, Enum.TextXAlignment.Right)
+	local dateLabel = makeLabel(homeHeader, "", UDim2.new(0, 100, 0, 12), UDim2.new(1, -114, 0, 28), Config.font, 9, Config.muted, Enum.TextXAlignment.Right)
+
+	-- Current game card.
+	local gameCard = makeCard(page, UDim2.new(1, -36, 0, 76), UDim2.new(0, 18, 0, 72))
+
+	local gameThumb = game.GameId ~= 0 and string.format("rbxthumb://type=GameIcon&id=%d&w=150&h=150", game.GameId) or Icons.Gamepad
+
+	local gameIcon = makeIcon(gameCard, gameThumb, UDim2.new(0, 52, 0, 52), UDim2.new(0, 12, 0, 12), WHITE)
+	gameIcon.ScaleType = Enum.ScaleType.Crop
+	gameIcon.BackgroundTransparency = 0
+	gameIcon.BackgroundColor3 = Config.chipOff
+	createCorner(gameIcon, 10)
+
+	local gameNameLabel = makeLabel(gameCard, "Loading...", UDim2.new(1, -86, 0, 16), UDim2.new(0, 74, 0, 10), Config.fontBold, 12.5, Config.text)
+	gameNameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+
+	makeLabel(gameCard, "Place ID  " .. game.PlaceId, UDim2.new(1, -86, 0, 12), UDim2.new(0, 74, 0, 29), Config.font, 10, Config.muted)
+
+	makeIcon(gameCard, Icons.Users, UDim2.new(0, 12, 0, 12), UDim2.new(0, 74, 0, 47), Config.good)
+	local playersLabel = makeLabel(gameCard, "", UDim2.new(1, -106, 0, 12), UDim2.new(0, 92, 0, 47), Config.fontMedium, 10, Config.good)
+
+	-- Real game name and icon from the marketplace.
+	task.spawn(function()
+		local ok, info = pcall(function()
+			return marketplaceService:GetProductInfo(game.PlaceId)
+		end)
+
+		if not AxionHub.alive then
+			return
+		end
+
+		if not ok or type(info) ~= "table" then
+			gameNameLabel.Text = "Unknown game"
+			return
+		end
+
+		gameNameLabel.Text = info.Name or "Unknown game"
+
+		local iconId = tonumber(info.IconImageAssetId)
+		if iconId and iconId > 0 then
+			gameIcon.Image = getIcon("rbxassetid://" .. iconId)
+		end
+	end)
+
+	-- System stats card.
+	local statsCard = makeCard(page, UDim2.new(1, -36, 0, 120), UDim2.new(0, 18, 0, 154))
+
+	makeLabel(statsCard, "SYSTEM & PERFORMANCE", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 8), Config.fontBold, 9.5, Config.accentLight)
+
+	local function makeStat(index, title, value)
+		local tile = Instance.new("Frame")
+		tile.Size = UDim2.new(0, 88, 0, 36)
+		tile.Position = UDim2.new(0, 14 + (index - 1) * 96, 0, 26)
+		tile.BackgroundColor3 = Config.chipOff
+		tile.BorderSizePixel = 0
+		tile.ZIndex = 4
+		tile.Parent = statsCard
+		createCorner(tile, 8)
+
+		makeLabel(tile, title, UDim2.new(1, -16, 0, 10), UDim2.new(0, 8, 0, 5), Config.fontBold, 8.5, Config.muted)
+
+		local valueLabel = makeLabel(tile, value, UDim2.new(1, -16, 0, 16), UDim2.new(0, 8, 0, 16), Config.fontBold, 11.5, Config.text)
+		valueLabel.TextTruncate = Enum.TextTruncate.AtEnd
+		return valueLabel
+	end
+
+	makeStat(1, "PLAYER", localPlayer.Name)
+	local uptimeValue = makeStat(2, "UPTIME", "00:00:00")
+	local fpsValue = makeStat(3, "FPS", "--")
+	local pingValue = makeStat(4, "PING", "--")
+
+	-- Small fps graph made of bars.
+	local graph = Instance.new("Frame")
+	graph.Size = UDim2.new(1, -28, 0, 44)
+	graph.Position = UDim2.new(0, 14, 0, 68)
+	graph.BackgroundColor3 = Config.track
+	graph.BorderSizePixel = 0
+	graph.ClipsDescendants = true
+	graph.ZIndex = 4
+	graph.Parent = statsCard
+	createCorner(graph, 8)
+
+	local graphLabel = makeLabel(graph, "FPS", UDim2.new(0, 30, 0, 10), UDim2.new(0, 6, 0, 3), Config.fontBold, 8, Config.muted)
+	graphLabel.ZIndex = 7
+
+	local bars = {}
+	local history = {}
+
+	for index = 1, GRAPH_BARS do
+		local bar = Instance.new("Frame")
+		bar.AnchorPoint = Vector2.new(0, 1)
+		bar.Size = UDim2.new(1 / GRAPH_BARS, -1, 0, 0)
+		bar.Position = UDim2.new((index - 1) / GRAPH_BARS, 1, 1, -2)
+		bar.BackgroundColor3 = Config.accentLight
+		bar.BorderSizePixel = 0
+		bar.ZIndex = 5
+		bar.Parent = graph
+		createCorner(bar, 2)
+
+		bars[index] = bar
+		history[index] = 0
+	end
+
+	---Color that matches how healthy the fps is.
+	local function fpsColor(value)
+		if value >= 50 then
+			return Config.good
+		end
+
+		if value >= 30 then
+			return Config.accentLight
+		end
+
+		return Config.bad
+	end
+
+	local function pushFps(fps)
+		table.remove(history, 1)
+		table.insert(history, fps)
+
+		local peak = 60
+		for _, value in ipairs(history) do
+			peak = math.max(peak, value)
+		end
+
+		for index, bar in ipairs(bars) do
+			local value = history[index]
+			local height = math.clamp(value / peak * 38, value > 0 and 2 or 0, 38)
+			bar.Size = UDim2.new(1 / GRAPH_BARS, -1, 0, height)
+			bar.BackgroundColor3 = fpsColor(value)
+		end
+	end
+
+	-- Quick actions card.
+	local actionsCard = makeCard(page, UDim2.new(1, -36, 0, 62), UDim2.new(0, 18, 0, 280))
+
+	makeLabel(actionsCard, "QUICK ACTIONS", UDim2.new(1, -28, 0, 14), UDim2.new(0, 14, 0, 6), Config.fontBold, 9.5, Config.accentLight)
+
+	local function makeAction(index, text, icon, callback)
+		local chip = makeChip(actionsCard, UDim2.new(0, 120, 0, 30), UDim2.new(0, 14 + (index - 1) * 128, 0, 24), text, 10, 999)
+		chip.label.Position = UDim2.new(0, 22, 0, 0)
+		chip.label.Size = UDim2.new(1, -28, 1, 0)
+		makeIcon(chip.button, icon, UDim2.new(0, 14, 0, 14), UDim2.new(0, 12, 0.5, -7), Config.text)
+		addHover(chip)
+
+		track(chip.button.MouseButton1Click:Connect(function()
+			playSound("Click")
+			styleChip(chip, true)
+
+			task.delay(0.3, function()
+				if AxionHub.alive then
+					styleChip(chip, false)
+				end
+			end)
+
+			callback()
+		end))
+	end
+
+	makeAction(1, "Server Hop", Icons.Hop, serverHop)
+	makeAction(2, "Rejoin", Icons.Refresh, rejoinServer)
+	makeAction(3, "Copy Discord", Icons.Link, copyDiscord)
+
+	-- Refresh every text on the page, fps is nil on the first pass.
+	local function refreshInfo(fps)
+		local now = os.date("*t")
+		greetingLabel.Text = getGreeting(now.hour)
+		timeLabel.Text = os.date("%H:%M")
+		dateLabel.Text = os.date("%a, %d %b")
+
+		playersLabel.Text = string.format("%d / %d players", #playersService:GetPlayers(), playersService.MaxPlayers)
+		uptimeValue.Text = formatTime(time())
+
+		local ping = getPing()
+		pingValue.Text = string.format("%d ms", math.floor(ping + 0.5))
+		pingValue.TextColor3 = ping < 100 and Config.good or (ping < 200 and Config.text or Config.bad)
+
+		if fps then
+			fpsValue.Text = tostring(math.floor(fps + 0.5))
+			fpsValue.TextColor3 = fpsColor(fps)
+			pushFps(fps)
+		end
+	end
+
+	refreshInfo()
+
+	task.spawn(function()
+		local lastFrames = State.frameCount
+		local lastClock = os.clock()
+
+		while AxionHub.alive and page.Parent do
+			task.wait(0.5)
+
+			local now = os.clock()
+			local fps = (State.frameCount - lastFrames) / math.max(now - lastClock, 0.001)
+			lastFrames = State.frameCount
+			lastClock = now
+
+			if not State.minimized then
+				refreshInfo(fps)
+			end
+		end
+	end)
+
+	return homeHeader
+end
+
 ---Build the whole interface.
 local function buildUI()
 	local parent = safeParent()
@@ -1274,6 +1658,7 @@ local function buildUI()
 	local shieldLabel = makeLabel(sidebar, "● protected", UDim2.new(1, -20, 0, 12), UDim2.new(0, 16, 1, -24), Config.font, 9, Config.good)
 
 	local pages = {
+		{ id = "HOME", icon = Icons.Home, label = "Home", desc = "overview & tools" },
 		{ id = "MAIN", icon = Icons.Dashboard, label = "Main", desc = "dice & collect" },
 		{ id = "SETTINGS", icon = Icons.Settings, label = "Settings", desc = "animation / range" },
 		{ id = "AFK", icon = Icons.Server, label = "AFK & Safe", desc = "24/7 · anti-ban" },
@@ -1284,8 +1669,8 @@ local function buildUI()
 	for index, page in ipairs(pages) do
 		local chip = makeChip(
 			sidebar,
-			UDim2.new(1, -24, 0, 44),
-			UDim2.new(0, 12, 0, 132 + (index - 1) * 50),
+			UDim2.new(1, -24, 0, 42),
+			UDim2.new(0, 12, 0, 132 + (index - 1) * 46),
 			"",
 			11,
 			22
@@ -1326,8 +1711,9 @@ local function buildUI()
 
 	local mainPage = makePage(content)
 	local settingsPage = makePage(content)
+	local homePage = makePage(content)
 	local afkPage = makePage(content)
-	local pageFrames = { MAIN = mainPage, SETTINGS = settingsPage, AFK = afkPage }
+	local pageFrames = { HOME = homePage, MAIN = mainPage, SETTINGS = settingsPage, AFK = afkPage }
 
 	-- Toast notification that slides up from the bottom.
 	local toast = Instance.new("Frame")
@@ -1377,6 +1763,9 @@ local function buildUI()
 			tween(toastIcon, 0.25, { ImageTransparency = 1 })
 		end)
 	end
+
+	-- Home page.
+	local homeHeader = buildHomePage(homePage)
 
 	-- Main page.
 	local header = makeCard(mainPage, UDim2.new(1, -90, 0, 42), UDim2.new(0, 18, 0, 16))
@@ -1882,7 +2271,7 @@ local function buildUI()
 	local draggingWindow = false
 	local dragStart, startPosition
 
-	for _, handle in ipairs({ header, settingsHeader, afkHeader }) do
+	for _, handle in ipairs({ homeHeader, header, settingsHeader, afkHeader }) do
 		track(handle.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 				draggingWindow = true
@@ -1969,6 +2358,7 @@ end
 
 ---Spin the gradients and run the roll visual killer.
 local function onHeartbeat()
+	State.frameCount = State.frameCount + 1
 	tickAntiFX()
 
 	if State.minimized then
