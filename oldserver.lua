@@ -1,744 +1,426 @@
 
 --[[
-    AxionHub v23 - Delta UI Recovery
-    Standalone Luau
-    Features:
-      - Responsive purple UI
-      - Home / Servers / Settings
-      - Server Hop / Rejoin / Copy Job ID
-      - Optional Icons.lua loader
-      - RightShift toggle
-      - Error reporting and cleanup
+    Axion Old Server Hop
+    Universal Roblox public-server hopper
+    Age options: 1 / 3 / 7 / 14 days
+    Age verification depends on API-provided timestamps.
+    Fallback: least-populated available public server.
 
-    Note:
-      Roblox does not expose a universal API for discovering
-      historical game versions across every experience.
+    Requires an executor supporting loadstring + HTTP requests.
 ]]
 
-if not shared then
-    return warn("[AxionHub] shared is unavailable")
-end
-
-if not game:IsLoaded() then
-    game.Loaded:Wait()
-end
-
-local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
-local TeleportService = game:GetService("TeleportService")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-
-local LP = Players.LocalPlayer
-
-local OLD = shared.AxionHub
-if type(OLD) == "table" and type(OLD.Destroy) == "function" then
-    pcall(function()
-        OLD:Destroy()
-    end)
-end
-
-local Hub = {
-    Alive = true,
-    Connections = {},
-    GUI = nil,
-    Page = "HOME",
-    Busy = false,
-}
-
-shared.AxionHub = Hub
-
-local C = {
-    Background = Color3.fromRGB(10, 5, 20),
-    Panel = Color3.fromRGB(24, 12, 42),
-    Card = Color3.fromRGB(35, 19, 58),
-    Accent = Color3.fromRGB(132, 72, 255),
-    Accent2 = Color3.fromRGB(190, 90, 255),
-    Text = Color3.fromRGB(245, 240, 255),
-    Muted = Color3.fromRGB(165, 150, 190),
-    Green = Color3.fromRGB(110, 245, 170),
-    Red = Color3.fromRGB(255, 105, 130),
-}
+local LIB_URL =
+    "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/Lib/AxionLib.lua"
 
 local ICONS_URL =
     "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/dist/Icons.lua"
 
-local Icons = {}
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
 
-local function addConnection(connection)
-    table.insert(Hub.Connections, connection)
-    return connection
-end
+local LocalPlayer = Players.LocalPlayer
 
-local function disconnectAll()
-    for _, connection in ipairs(Hub.Connections) do
-        pcall(function()
-            connection:Disconnect()
-        end)
-    end
-    table.clear(Hub.Connections)
-end
+local ENV = (type(getgenv) == "function" and getgenv()) or _G
 
-function Hub:Destroy()
-    self.Alive = false
-    disconnectAll()
+ENV.AxionOldServerAge = ENV.AxionOldServerAge or 7
 
-    if self.GUI then
-        pcall(function()
-            self.GUI:Destroy()
-        end)
-        self.GUI = nil
-    end
-end
+local VALID_AGES = {
+    [1] = true,
+    [3] = true,
+    [7] = true,
+    [14] = true,
+}
 
-local function getParent()
-    if type(gethui) == "function" then
-        local ok, result = pcall(gethui)
-        if ok and result then
-            return result
-        end
-    end
-
-    local playerGui = LP:FindFirstChildOfClass("PlayerGui")
-    if playerGui then
-        return playerGui
-    end
-
-    return game:GetService("CoreGui")
-end
-
-local function loadIcons()
-    if type(request) ~= "function" then
-        warn("[AxionHub] request() unavailable; using built-in UI")
-        return
-    end
-
-    local ok, response = pcall(function()
-        return request({
-            Url = ICONS_URL,
+local function httpGet(url)
+    if type(request) == "function" then
+        local response = request({
+            Url = url,
             Method = "GET",
         })
-    end)
 
-    if not ok or type(response) ~= "table"
-        or not response.Success
-        or type(response.Body) ~= "string" then
-        warn("[AxionHub] Icons.lua unavailable; using built-in UI")
-        return
-    end
-
-    if type(loadstring) ~= "function" then
-        return
-    end
-
-    local compiled, chunk = pcall(loadstring, response.Body)
-    if not compiled or type(chunk) ~= "function" then
-        warn("[AxionHub] Icons.lua could not be compiled")
-        return
-    end
-
-    local ran, result = pcall(chunk)
-    if ran and type(result) == "table" then
-        Icons = result
-    end
-end
-
-local function create(className, props, parent)
-    local obj = Instance.new(className)
-
-    for key, value in pairs(props or {}) do
-        local ok, err = pcall(function()
-            obj[key] = value
-        end)
-
-        if not ok then
-            warn("[AxionHub] Property " .. key .. ": " .. tostring(err))
-        end
-    end
-
-    obj.Parent = parent
-    return obj
-end
-
-local function corner(parent, radius)
-    return create("UICorner", {
-        CornerRadius = UDim.new(0, radius or 10),
-    }, parent)
-end
-
-local function stroke(parent, color, transparency)
-    return create("UIStroke", {
-        Color = color or C.Accent,
-        Transparency = transparency or 0.4,
-        Thickness = 1,
-    }, parent)
-end
-
-local function label(parent, text, size, position, textSize, color, bold)
-    return create("TextLabel", {
-        BackgroundTransparency = 1,
-        Size = size,
-        Position = position,
-        Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham,
-        Text = text,
-        TextSize = textSize or 12,
-        TextColor3 = color or C.Text,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        TextWrapped = true,
-    }, parent)
-end
-
-local function button(parent, text, position, size, callback)
-    local b = create("TextButton", {
-        Size = size,
-        Position = position,
-        BackgroundColor3 = C.Card,
-        BorderSizePixel = 0,
-        AutoButtonColor = true,
-        Text = text,
-        TextColor3 = C.Text,
-        TextSize = 12,
-        Font = Enum.Font.GothamBold,
-    }, parent)
-
-    corner(b, 9)
-    stroke(b, C.Accent, 0.65)
-
-    addConnection(b.Activated:Connect(function()
-        if Hub.Alive and callback then
-            local ok, err = pcall(callback)
-            if not ok then
-                warn("[AxionHub] Button error: " .. tostring(err))
-            end
-        end
-    end))
-
-    return b
-end
-
-local root
-local content
-local toastLabel
-local pages = {}
-local navButtons = {}
-local statusLabel
-local serverCountLabel
-
-local function notify(message, color)
-    if toastLabel and toastLabel.Parent then
-        toastLabel.Text = tostring(message)
-        toastLabel.TextColor3 = color or C.Text
-    end
-end
-
-local function showPage(name)
-    Hub.Page = name
-
-    for pageName, frame in pairs(pages) do
-        frame.Visible = pageName == name
-    end
-
-    for pageName, b in pairs(navButtons) do
-        b.BackgroundColor3 =
-            pageName == name and C.Accent or C.Card
-    end
-end
-
-local function createPage(name)
-    local frame = create("ScrollingFrame", {
-        Name = name,
-        Size = UDim2.new(1, -170, 1, -80),
-        Position = UDim2.new(0, 155, 0, 65),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        ScrollBarThickness = 3,
-        ScrollBarImageColor3 = C.Accent,
-        CanvasSize = UDim2.new(0, 0, 0, 0),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        Visible = false,
-    }, root)
-
-    create("UIPadding", {
-        PaddingBottom = UDim.new(0, 12),
-        PaddingRight = UDim.new(0, 8),
-    }, frame)
-
-    create("UIListLayout", {
-        Padding = UDim.new(0, 10),
-        SortOrder = Enum.SortOrder.LayoutOrder,
-    }, frame)
-
-    pages[name] = frame
-    return frame
-end
-
-local function makeCard(parent, title, height)
-    local card = create("Frame", {
-        Size = UDim2.new(1, -4, 0, height or 100),
-        BackgroundColor3 = C.Panel,
-        BorderSizePixel = 0,
-    }, parent)
-
-    corner(card, 12)
-    stroke(card, C.Accent, 0.78)
-
-    label(card, title, UDim2.new(1, -24, 0, 28),
-        UDim2.new(0, 12, 0, 5), 13, C.Accent2, true)
-
-    return card
-end
-
-local function makeAction(parent, title, description, callback)
-    local card = makeCard(parent, title, 76)
-
-    label(card, description,
-        UDim2.new(0.58, -16, 0, 32),
-        UDim2.new(0, 12, 0, 34), 10, C.Muted)
-
-    button(card, "RUN",
-        UDim2.new(1, -86, 0, 35),
-        UDim2.new(0, 72, 0, 30),
-        callback)
-
-    return card
-end
-
-local function getServerList()
-    if type(request) ~= "function" then
-        return nil, "This executor does not expose request()"
-    end
-
-    local url = string.format(
-        "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
-        game.PlaceId
-    )
-
-    local all = {}
-    local cursor = nil
-
-    for _ = 1, 3 do
-        if cursor then
-            url = string.format(
-                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100&cursor=%s",
-                game.PlaceId,
-                HttpService:UrlEncode(cursor)
-            )
+        if response and response.Success and response.Body then
+            return response.Body
         end
 
-        local ok, response = pcall(function()
-            return request({
-                Url = url,
-                Method = "GET",
-            })
-        end)
-
-        if not ok or not response or not response.Success then
-            return nil, "Server API request failed"
-        end
-
-        local decoded, data = pcall(function()
-            return HttpService:JSONDecode(response.Body)
-        end)
-
-        if not decoded or type(data) ~= "table"
-            or type(data.data) ~= "table" then
-            return nil, "Invalid server API response"
-        end
-
-        for _, server in ipairs(data.data) do
-            if server.id
-                and server.id ~= game.JobId
-                and type(server.playing) == "number"
-                and type(server.maxPlayers) == "number"
-                and server.playing < server.maxPlayers then
-                table.insert(all, server)
-            end
-        end
-
-        cursor = data.nextPageCursor
-        if not cursor then
-            break
-        end
+        error("HTTP request failed: " .. url)
     end
 
-    return all
+    if type(http_request) == "function" then
+        local response = http_request({
+            Url = url,
+            Method = "GET",
+        })
+
+        if response and response.Body then
+            return response.Body
+        end
+
+        error("HTTP request failed: " .. url)
+    end
+
+    return game:HttpGet(url)
 end
 
-local function teleportToServer(serverId)
-    if Hub.Busy then
-        notify("Teleport already in progress", C.Muted)
-        return
-    end
-
-    Hub.Busy = true
-    notify("Requesting teleport...", C.Accent2)
-
-    local ok, err = pcall(function()
-        TeleportService:TeleportToPlaceInstance(
-            game.PlaceId,
-            serverId,
-            LP
-        )
-    end)
-
-    if not ok then
-        Hub.Busy = false
-        notify("Teleport failed: " .. tostring(err), C.Red)
-        return
-    end
-
-    notify("Teleport requested", C.Green)
+local function makeRequest(url)
+    local body = httpGet(url)
+    return HttpService:JSONDecode(body)
 end
 
+-- Load the requested icon source explicitly.
+local iconSource
+local iconTable
+
+local iconsOK, iconsResult = pcall(function()
+    iconSource = httpGet(ICONS_URL)
+
+    local iconChunk = loadstring(iconSource)
+    assert(iconChunk, "Icons.lua could not be compiled")
+
+    return iconChunk()
+end)
+
+if iconsOK and type(iconsResult) == "table" then
+    iconTable = iconsResult
+    ENV.AxionOldServerIcons = iconTable
+else
+    warn("[Axion Old Server Hop] Icons source could not be loaded:", iconsResult)
+end
+
+-- Download AxionLib and replace its default random Server Hop
+-- with the server-selection routine below.
+local function buildPatchedLibrary(source)
+    local startToken = "local function serverHop()"
+    local endToken = "local function rejoinServer()"
+
+    local startAt = source:find(startToken, 1, true)
+    assert(startAt, "Could not find serverHop() in AxionLib")
+
+    local endAt = source:find(endToken, startAt + #startToken, true)
+    assert(endAt, "Could not find rejoinServer() in AxionLib")
+
+    local replacement = [=[
 local function serverHop()
-    notify("Searching public servers...", C.Accent2)
+    if State.hopping then
+        return
+    end
+
+    State.hopping = true
+    notify("Searching public servers...", Config.muted)
 
     task.spawn(function()
-        local servers, err = getServerList()
+        local candidates = {}
+        local cursor = nil
+        local pagesChecked = 0
+        local MAX_PAGES = 10
+        local selectedAge = tonumber(
+            (type(getgenv) == "function" and getgenv() or _G).AxionOldServerAge
+        ) or 7
 
-        if not Hub.Alive then
-            return
+        if selectedAge ~= 1 and selectedAge ~= 3
+            and selectedAge ~= 7 and selectedAge ~= 14 then
+            selectedAge = 7
         end
 
-        if not servers then
-            notify(err or "Search failed", C.Red)
-            return
-        end
+        local cutoff = os.time() - selectedAge * 24 * 60 * 60
 
-        if #servers == 0 then
-            notify("No other public server found", C.Red)
-            return
-        end
+        for page = 1, MAX_PAGES do
+            pagesChecked = page
 
-        local target = servers[math.random(1, #servers)]
-
-        if serverCountLabel then
-            serverCountLabel.Text =
-                string.format("Available servers: %d", #servers)
-        end
-
-        teleportToServer(target.id)
-    end)
-end
-
-local function rejoin()
-    if Hub.Busy then
-        notify("Teleport already in progress", C.Muted)
-        return
-    end
-
-    Hub.Busy = true
-    notify("Rejoining current server...", C.Accent2)
-
-    local ok, err = pcall(function()
-        TeleportService:TeleportToPlaceInstance(
-            game.PlaceId,
-            game.JobId,
-            LP
-        )
-    end)
-
-    if not ok then
-        Hub.Busy = false
-        notify("Rejoin failed: " .. tostring(err), C.Red)
-    end
-end
-
-local function copyJobId()
-    if type(setclipboard) ~= "function" then
-        notify("Clipboard API unavailable", C.Red)
-        return
-    end
-
-    if game.JobId == "" then
-        notify("Job ID unavailable", C.Red)
-        return
-    end
-
-    local ok = pcall(setclipboard, game.JobId)
-    notify(ok and "Job ID copied" or "Copy failed",
-        ok and C.Green or C.Red)
-end
-
-local function buildUI()
-    local gui = create("ScreenGui", {
-        Name = "AxionHub_v23",
-        ResetOnSpawn = false,
-        IgnoreGuiInset = true,
-        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-        DisplayOrder = 999,
-    }, getParent())
-
-    Hub.GUI = gui
-
-    root = create("Frame", {
-        Name = "MainWindow",
-        Size = UDim2.new(0, 580, 0, 390),
-        Position = UDim2.new(0.5, -290, 0.5, -195),
-        BackgroundColor3 = C.Background,
-        BorderSizePixel = 0,
-        Active = true,
-    }, gui)
-
-    corner(root, 14)
-    stroke(root, C.Accent, 0.15)
-
-    local scale = create("UIScale", {
-        Scale = 1,
-    }, root)
-
-    local function resize()
-        local camera = workspace.CurrentCamera
-        if not camera then
-            return
-        end
-
-        local v = camera.ViewportSize
-        scale.Scale = math.clamp(
-            math.min((v.X - 20) / 580, (v.Y - 20) / 390),
-            0.45,
-            1
-        )
-    end
-
-    resize()
-
-    if workspace.CurrentCamera then
-        addConnection(
-            workspace.CurrentCamera:GetPropertyChangedSignal(
-                "ViewportSize"
-            ):Connect(resize)
-        )
-    end
-
-    local sidebar = create("Frame", {
-        Size = UDim2.new(0, 145, 1, 0),
-        BackgroundColor3 = C.Panel,
-        BorderSizePixel = 0,
-    }, root)
-
-    corner(sidebar, 14)
-
-    label(sidebar, "AXION", UDim2.new(1, -20, 0, 32),
-        UDim2.new(0, 14, 0, 14), 21, C.Text, true)
-
-    label(sidebar, "H U B   v23", UDim2.new(1, -20, 0, 18),
-        UDim2.new(0, 14, 0, 45), 10, C.Accent2, true)
-
-    local navItems = {
-        {"HOME", "Home"},
-        {"SERVERS", "Servers"},
-        {"SETTINGS", "Settings"},
-    }
-
-    for index, item in ipairs(navItems) do
-        local name, title = item[1], item[2]
-
-        local b = button(
-            sidebar,
-            title,
-            UDim2.new(0, 10, 0, 90 + (index - 1) * 47),
-            UDim2.new(1, -20, 0, 38),
-            function()
-                showPage(name)
-            end
-        )
-
-        navButtons[name] = b
-    end
-
-    button(sidebar, "CLOSE",
-        UDim2.new(0, 10, 1, -48),
-        UDim2.new(1, -20, 0, 34),
-        function()
-            Hub:Destroy()
-        end)
-
-    label(root, "AXION HUB",
-        UDim2.new(0, 220, 0, 25),
-        UDim2.new(0, 160, 0, 16), 16, C.Text, true)
-
-    toastLabel = label(root, "Ready",
-        UDim2.new(0, 245, 0, 20),
-        UDim2.new(1, -255, 0, 18), 10, C.Green)
-
-    -- HOME
-    local home = createPage("HOME")
-
-    local welcome = makeCard(home, "WELCOME", 94)
-    label(welcome, "Player: " .. LP.Name,
-        UDim2.new(1, -24, 0, 20),
-        UDim2.new(0, 12, 0, 36), 12, C.Text)
-
-    label(welcome, "Place ID: " .. tostring(game.PlaceId),
-        UDim2.new(1, -24, 0, 20),
-        UDim2.new(0, 12, 0, 59), 11, C.Muted)
-
-    local serverInfo = makeCard(home, "CURRENT SESSION", 82)
-    label(serverInfo, "Job ID: " ..
-        (game.JobId ~= "" and game.JobId or "Unavailable"),
-        UDim2.new(1, -24, 0, 38),
-        UDim2.new(0, 12, 0, 34), 10, C.Muted)
-
-    makeAction(home, "SERVER HOP",
-        "Find another public server",
-        serverHop)
-
-    makeAction(home, "REJOIN",
-        "Request to join this server again",
-        rejoin)
-
-    -- SERVERS
-    local serverPage = createPage("SERVERS")
-
-    local searchCard = makeCard(serverPage, "PUBLIC SERVER SEARCH", 120)
-
-    label(searchCard,
-        "Searches public servers for this Place. Historical game versions cannot be verified by this endpoint.",
-        UDim2.new(1, -24, 0, 44),
-        UDim2.new(0, 12, 0, 32), 10, C.Muted)
-
-    button(searchCard, "SEARCH & HOP",
-        UDim2.new(0, 12, 0, 78),
-        UDim2.new(0, 145, 0, 30),
-        serverHop)
-
-    local countCard = makeCard(serverPage, "SEARCH RESULT", 66)
-    serverCountLabel = label(countCard, "Available servers: not searched",
-        UDim2.new(1, -24, 0, 24),
-        UDim2.new(0, 12, 0, 33), 11, C.Text)
-
-    makeAction(serverPage, "COPY JOB ID",
-        "Copy the current server instance ID",
-        copyJobId)
-
-    -- SETTINGS
-    local settings = createPage("SETTINGS")
-
-    local about = makeCard(settings, "ABOUT", 105)
-
-    label(about,
-        "AxionHub v23\nStandalone UI recovery build\nRightShift toggles the window.",
-        UDim2.new(1, -24, 0, 66),
-        UDim2.new(0, 12, 0, 33), 11, C.Muted)
-
-    makeAction(settings, "REJOIN CURRENT SERVER",
-        "Attempt to return to this instance",
-        rejoin)
-
-    makeAction(settings, "DESTROY UI",
-        "Close the hub and disconnect UI events",
-        function()
-            Hub:Destroy()
-        end)
-
-    showPage("HOME")
-
-    -- Drag window using its title area.
-    local dragging = false
-    local dragStart
-    local startPosition
-
-    local dragBar = create("TextButton", {
-        Text = "",
-        BackgroundTransparency = 1,
-        Size = UDim2.new(1, -160, 0, 52),
-        Position = UDim2.new(0, 150, 0, 0),
-        AutoButtonColor = false,
-        Active = true,
-    }, root)
-
-    addConnection(dragBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPosition = root.Position
-        end
-    end))
-
-    addConnection(UserInputService.InputChanged:Connect(function(input)
-        if not dragging then
-            return
-        end
-
-        if input.UserInputType == Enum.UserInputType.MouseMovement
-            or input.UserInputType == Enum.UserInputType.Touch then
-            local delta = input.Position - dragStart
-            root.Position = UDim2.new(
-                startPosition.X.Scale,
-                startPosition.X.Offset + delta.X,
-                startPosition.Y.Scale,
-                startPosition.Y.Offset + delta.Y
+            local url = string.format(
+                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
+                game.PlaceId
             )
-        end
-    end))
 
-    addConnection(UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end))
+            if cursor then
+                url = url .. "&cursor=" .. HttpService:UrlEncode(cursor)
+            end
 
-    local minimized = false
+            local ok, data = pcall(function()
+                local response = request({
+                    Url = url,
+                    Method = "GET",
+                })
 
-    button(root, "—",
-        UDim2.new(1, -65, 0, 12),
-        UDim2.new(0, 24, 0, 24),
-        function()
-            minimized = not minimized
+                if not response or not response.Success then
+                    error("Server list request failed")
+                end
 
-            for _, child in ipairs(root:GetChildren()) do
-                if child ~= scale and child ~= sidebar then
-                    if child:IsA("GuiObject") then
-                        child.Visible = not minimized
+                return HttpService:JSONDecode(response.Body)
+            end)
+
+            if not ok or type(data) ~= "table"
+                or type(data.data) ~= "table" then
+                break
+            end
+
+            for _, server in ipairs(data.data) do
+                if server.id
+                    and server.id ~= game.JobId
+                    and type(server.playing) == "number"
+                    and type(server.maxPlayers) == "number"
+                    and server.playing < server.maxPlayers then
+
+                    local createdAt = server.createdAt or server.created
+                    local createdTime
+
+                    if type(createdAt) == "number" then
+                        createdTime = createdAt
+                        if createdTime > 100000000000 then
+                            createdTime = math.floor(createdTime / 1000)
+                        end
+                    elseif type(createdAt) == "string" then
+                        local okTime, parsed = pcall(function()
+                            local y, m, d, h, min, sec =
+                                createdAt:match(
+                                    "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)"
+                                )
+
+                            if not y then
+                                return nil
+                            end
+
+                            return os.time({
+                                year = tonumber(y),
+                                month = tonumber(m),
+                                day = tonumber(d),
+                                hour = tonumber(h),
+                                min = tonumber(min),
+                                sec = tonumber(sec),
+                            })
+                        end)
+
+                        if okTime then
+                            createdTime = parsed
+                        end
                     end
+
+                    table.insert(candidates, {
+                        id = server.id,
+                        playing = server.playing,
+                        maxPlayers = server.maxPlayers,
+                        createdTime = createdTime,
+                    })
                 end
             end
 
-            root.Size = minimized
-                and UDim2.new(0, 145, 0, 62)
-                or UDim2.new(0, 580, 0, 390)
+            cursor = data.nextPageCursor
+            if not cursor then
+                break
+            end
 
-            sidebar.Visible = not minimized
-        end)
+            task.wait(0.15)
+        end
 
-    addConnection(UserInputService.InputBegan:Connect(function(input, processed)
-        if processed or not Hub.Alive then
+        if #candidates == 0 then
+            State.hopping = false
+            notify("No available public servers found", Config.bad)
             return
         end
 
-        if input.KeyCode == Enum.KeyCode.RightShift then
-            root.Visible = not root.Visible
+        -- Prefer servers whose timestamps are available and
+        -- old enough for the selected age.
+        local verified = {}
+
+        for _, server in ipairs(candidates) do
+            if server.createdTime and server.createdTime <= cutoff then
+                table.insert(verified, server)
+            end
         end
-    end))
 
-    return gui
-end
+        local pool
+        local verifiedAge = #verified > 0
 
--- Optional icon library: UI remains usable if this fails.
-task.spawn(function()
-    local ok, err = xpcall(function()
-        loadIcons()
-        if Hub.Alive then
-            buildUI()
-        end
-    end, function(message)
-        return debug.traceback(tostring(message), 2)
-    end)
+        if verifiedAge then
+            pool = verified
 
-    if not ok then
-        warn("[AxionHub] Initialization failed:\n" .. tostring(err))
+            table.sort(pool, function(a, b)
+                return a.createdTime < b.createdTime
+            end)
+        else
+            -- Public server-list responses commonly have no creation
+            -- timestamp. Use the lowest population as a fallback;
+            -- this does NOT prove that the server is older.
+            pool = candidates
 
-        if Hub.GUI then
-            pcall(function()
-                Hub.GUI:Destroy()
+            table.sort(pool, function(a, b)
+                if a.playing == b.playing then
+                    return a.maxPlayers > b.maxPlayers
+                end
+
+                return a.playing < b.playing
             end)
         end
-    end
-end)
 
-print("[AxionHub] v23 loaded")
+        local target = pool[1]
+
+        if not target then
+            State.hopping = false
+            notify("No suitable server found", Config.bad)
+            return
+        end
+
+        if verifiedAge then
+            notify(
+                "Found server matching age threshold (" ..
+                selectedAge .. "d); checked " .. pagesChecked .. " pages",
+                Config.good
+            )
+        else
+            notify(
+                "Age unavailable; using lowest-population server (" ..
+                target.playing .. " players)",
+                Config.muted
+            )
+        end
+
+        saveConfig()
+
+        local teleportOK, teleportError = pcall(function()
+            TeleportService:TeleportToPlaceInstance(
+                game.PlaceId,
+                target.id,
+                LocalPlayer
+            )
+        end)
+
+        if not teleportOK then
+            notify("Teleport failed: " .. tostring(teleportError), Config.bad)
+            State.hopping = false
+            return
+        end
+
+        task.delay(15, function()
+            State.hopping = false
+        end)
+    end)
+end
+
+]=]
+
+    return source:sub(1, startAt - 1)
+        .. replacement
+        .. source:sub(endAt)
+end
+
+-- Build a compact age selector.
+local function createAgeSelector()
+    local parent = CoreGui
+
+    if type(gethui) == "function" then
+        local ok, hui = pcall(gethui)
+        if ok and hui then
+            parent = hui
+        end
+    end
+
+    local old = parent:FindFirstChild("AxionOldServerAgeSelector")
+    if old then
+        old:Destroy()
+    end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "AxionOldServerAgeSelector"
+    gui.ResetOnSpawn = false
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Parent = parent
+
+    local frame = Instance.new("Frame")
+    frame.Name = "AgePanel"
+    frame.Size = UDim2.fromOffset(260, 112)
+    frame.Position = UDim2.new(0, 18, 0.5, -56)
+    frame.BackgroundColor3 = Color3.fromRGB(20, 12, 35)
+    frame.BorderSizePixel = 0
+    frame.Parent = gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = frame
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(126, 70, 235)
+    stroke.Thickness = 1
+    stroke.Parent = frame
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -16, 0, 27)
+    title.Position = UDim2.fromOffset(8, 5)
+    title.BackgroundTransparency = 1
+    title.Text = "AXION  /  OLD SERVER HOP"
+    title.TextColor3 = Color3.fromRGB(245, 238, 255)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 12
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = frame
+
+    local status = Instance.new("TextLabel")
+    status.Size = UDim2.new(1, -16, 0, 18)
+    status.Position = UDim2.fromOffset(8, 30)
+    status.BackgroundTransparency = 1
+    status.Text = "Preferred age (if available)"
+    status.TextColor3 = Color3.fromRGB(178, 162, 202)
+    status.Font = Enum.Font.Gotham
+    status.TextSize = 10
+    status.TextXAlignment = Enum.TextXAlignment.Left
+    status.Parent = frame
+
+    local selected = tonumber(ENV.AxionOldServerAge) or 7
+    local buttonWidth = 55
+
+    for index, days in ipairs({1, 3, 7, 14}) do
+        local button = Instance.new("TextButton")
+        button.Name = "Age" .. days
+        button.Size = UDim2.fromOffset(buttonWidth, 30)
+        button.Position = UDim2.fromOffset(8 + (index - 1) * 61, 57)
+        button.BackgroundColor3 = days == selected
+            and Color3.fromRGB(111, 64, 206)
+            or Color3.fromRGB(39, 27, 57)
+        button.BorderSizePixel = 0
+        button.Text = tostring(days) .. "d"
+        button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        button.Font = Enum.Font.GothamBold
+        button.TextSize = 12
+        button.Parent = frame
+
+        local buttonCorner = Instance.new("UICorner")
+        buttonCorner.CornerRadius = UDim.new(0, 7)
+        buttonCorner.Parent = button
+
+        button.MouseButton1Click:Connect(function()
+            ENV.AxionOldServerAge = days
+
+            for _, child in ipairs(frame:GetChildren()) do
+                if child:IsA("TextButton") then
+                    child.BackgroundColor3 =
+                        child == button
+                        and Color3.fromRGB(111, 64, 206)
+                        or Color3.fromRGB(39, 27, 57)
+                end
+            end
+
+            status.Text = "Preferred age: " .. days .. " days"
+        end)
+    end
+end
+
+local function main()
+    assert(type(loadstring) == "function",
+        "This executor does not support loadstring")
+
+    local source = httpGet(LIB_URL)
+    local patchedSource = buildPatchedLibrary(source)
+
+    createAgeSelector()
+
+    local chunk, compileError = loadstring(patchedSource)
+    assert(chunk, "AxionLib compile error: " .. tostring(compileError))
+
+    chunk()
+end
+
+local ok, err = pcall(main)
+
+if not ok then
+    warn("[Axion Old Server Hop] Error:", err)
+end
