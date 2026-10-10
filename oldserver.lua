@@ -1,9 +1,9 @@
 --[[
     Old Server Rejoin
     Author  : @alwayszoey
-    Version : 1.1.0
+    Version : 1.2.0
     Lib     : AxionLib v2.0.0
-    Icons   : Icons.lua (dist)
+    Icons   : dist/Icons.lua
 ]]
 
 local AxionLib = loadstring(game:HttpGet(
@@ -18,34 +18,33 @@ local LocalPlayer     = Players.LocalPlayer
 local PLACE_ID        = game.PlaceId
 local PLACE_VERSION   = game.PlaceVersion
 local CONFIG_NAME     = "oldserver"
-local SCAN_PAGE_SIZE  = 100
-local SCAN_MAX_PAGES  = 20
+local PAGE_SIZE       = 100
+local MAX_PAGES       = 15
 
 local LOGO_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/Untitled27_20261009042444.png"
 
 local State = {
     scanning = false,
-    cache    = {},
     pending  = nil,
+    teleporting = false,
 }
 
-local function Notify(options)
-    if type(options) == "string" then
-        options = { content = options }
+local function Notify(opts)
+    if type(opts) == "string" then
+        opts = { content = opts }
     end
 
-    options.title    = options.title or "Old Server"
-    options.type     = options.type  or "info"
-    options.duration = options.duration or 3
+    opts.title    = opts.title or "Old Server"
+    opts.type     = opts.type  or "info"
+    opts.duration = opts.duration or 3
 
-    AxionLib:notify(options)
+    AxionLib:notify(opts)
 end
 
 local function IsOlder(version)
     if not version or version <= 0 then
         return false
     end
-
     return version < PLACE_VERSION
 end
 
@@ -89,7 +88,8 @@ end
 
 local function FetchServers(limit, onlyOld, onProgress)
     local collected = {}
-    local pages     = math.min(math.ceil(limit / SCAN_PAGE_SIZE), SCAN_MAX_PAGES)
+    local cursor    = ""
+    local pages     = math.min(math.ceil(limit / PAGE_SIZE), MAX_PAGES)
 
     for page = 1, pages do
         if #collected >= limit then
@@ -97,22 +97,22 @@ local function FetchServers(limit, onlyOld, onProgress)
         end
 
         local ok, result = pcall(function()
-            return HttpService:GetSortedAsync("Asc", SCAN_PAGE_SIZE, page, PLACE_ID, "")
+            return HttpService:GetSortedAsync("Asc", PAGE_SIZE, page, PLACE_ID, "")
         end)
 
         local retries = 0
 
-        while not ok and retries < 2 do
+        while not ok and retries < 3 do
             retries = retries + 1
-            task.wait(1.25)
+            task.wait(1.5)
 
             ok, result = pcall(function()
-                return HttpService:GetSortedAsync("Asc", SCAN_PAGE_SIZE, page, PLACE_ID, "")
+                return HttpService:GetSortedAsync("Asc", PAGE_SIZE, page, PLACE_ID, "")
             end)
         end
 
         if not ok or not result then
-            break
+            return nil, "GetSortedAsync ล้มเหลว: " .. tostring(result)
         end
 
         local data = result:GetCurrentPage()
@@ -138,7 +138,12 @@ local function FetchServers(limit, onlyOld, onProgress)
             onProgress(#collected)
         end
 
-        if not result:AdvanceToNextPageAsync() then
+        local advanced = false
+        pcall(function()
+            advanced = result:AdvanceToNextPageAsync()
+        end)
+
+        if not advanced then
             break
         end
     end
@@ -174,27 +179,33 @@ local function SortServers(list)
     return list
 end
 
-local function QueueReload()
-    if not queue_on_teleport then
-        return
+local function TeleportTo(jobId)
+    if State.teleporting then
+        return false, "กำลังเทเลพอร์ตอยู่"
     end
 
-    local source = string.format([[
-        local AxionLib = loadstring(game:HttpGet(
-            "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/Lib/AxionLib.lua"
-        ))()
-        pcall(function() AxionLib:loadConfig("%s") end)
-    ]], CONFIG_NAME)
+    State.teleporting = true
 
-    pcall(queue_on_teleport, source)
-end
+    if queue_on_teleport then
+        local source = string.format([[
+            task.wait(2)
+            local AxionLib = loadstring(game:HttpGet(
+                "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/Lib/AxionLib.lua"
+            ))()
+            pcall(function() AxionLib:loadConfig("%s") end)
+        ]], CONFIG_NAME)
 
-local function TeleportTo(jobId)
-    QueueReload()
+        pcall(queue_on_teleport, source)
+    end
+
+    local options = Instance.new("TeleportOptions")
+    options.ServerInstanceId = jobId
 
     local ok, err = pcall(function()
-        TeleportService:TeleportToPlaceInstance(PLACE_ID, jobId, LocalPlayer)
+        TeleportService:TeleportAsync(PLACE_ID, { LocalPlayer }, options)
     end)
+
+    State.teleporting = false
 
     return ok, err
 end
@@ -208,7 +219,7 @@ local function RejoinOldest(onlyOld, minPlayers, maxPlayers)
     State.scanning = true
     Notify({ content = "กำลังสแกนเซิร์ฟเวอร์...", type = "info", duration = 2 })
 
-    local ok, list = pcall(FetchServers, 200, onlyOld, function(count)
+    local list, err = FetchServers(200, onlyOld, function(count)
         if count > 0 and count % 50 == 0 then
             Notify({ content = "พบแล้ว " .. count .. " เซิร์ฟเวอร์", type = "info", duration = 1 })
         end
@@ -216,12 +227,12 @@ local function RejoinOldest(onlyOld, minPlayers, maxPlayers)
 
     State.scanning = false
 
-    if not ok then
-        Notify({ title = "ผิดพลาด", content = tostring(list), type = "error", duration = 4 })
+    if not list then
+        Notify({ title = "ผิดพลาด", content = err or "ไม่ทราบสาเหตุ", type = "error", duration = 5 })
         return
     end
 
-    if not list or #list == 0 then
+    if #list == 0 then
         Notify({
             title    = "ไม่พบเซิร์ฟเวอร์",
             content  = onlyOld and "ทุกเซิร์ฟเวอร์เป็นเวอร์ชันล่าสุดแล้ว" or "ไม่พบเซิร์ฟเวอร์เลย",
@@ -234,6 +245,7 @@ local function RejoinOldest(onlyOld, minPlayers, maxPlayers)
     local filtered = FilterServers(list, minPlayers or 0, maxPlayers or math.huge)
 
     if #filtered == 0 then
+        Notify({ content = "ไม่พบเซิร์ฟเวอร์ที่ตรงเงื่อนไข ใช้ทั้งหมดแทน", type = "warning" })
         filtered = list
     end
 
@@ -250,7 +262,7 @@ local function RejoinOldest(onlyOld, minPlayers, maxPlayers)
         duration = 4,
     })
 
-    task.wait(0.4)
+    task.wait(0.5)
 
     local tpOk, tpErr = TeleportTo(target.id)
 
@@ -296,12 +308,12 @@ local function RejoinRandom(onlyOld, minPlayers, maxPlayers)
     State.scanning = true
     Notify({ content = "กำลังสแกนเซิร์ฟเวอร์...", type = "info", duration = 2 })
 
-    local ok, list = pcall(FetchServers, 200, onlyOld)
+    local list, err = FetchServers(200, onlyOld)
 
     State.scanning = false
 
-    if not ok or not list or #list == 0 then
-        Notify({ title = "ไม่พบเซิร์ฟเวอร์", type = "warning" })
+    if not list or #list == 0 then
+        Notify({ title = "ไม่พบเซิร์ฟเวอร์", content = err, type = "warning" })
         return
     end
 
