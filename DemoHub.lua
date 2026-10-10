@@ -1,72 +1,173 @@
--- DemoHub.lua — same idea as before, but now using AxionLib's bundled
--- Home page (greeting/clock, game info, performance, quick actions) instead
--- of building it by hand.
 
-local LIB_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/Lib/AxionLib.lua"
-local ICONS_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/dist/Icons.lua"
+-- AxionLib Demo Hub
+-- Roblox Luau / Executor environment
 
-local function fetch(url)
-	local response = request({ Url = url, Method = "GET" })
-	assert(response and response.Success, "failed to fetch " .. url)
-	return response.Body
+local LibraryURL =
+    "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/Lib/AxionLib.lua"
+
+local ok, AxionLib = pcall(function()
+    return loadstring(game:HttpGet(LibraryURL))()
+end)
+
+if not ok or type(AxionLib) ~= "table" then
+    warn("[AxionDemo] Failed to load AxionLib:", AxionLib)
+    return
 end
 
-local AxionLib = loadstring(fetch(LIB_URL))()
-AxionLib.LoadIconPack(ICONS_URL, "DemoHub/icons.lua")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
 
---// Window -----------------------------------------------------------------
--- `Home` is bundled by the library itself: pass options and it builds the
--- greeting/game-info/performance/quick-actions page as the first tab.
--- Any custom tabs in `Tabs` are appended after it.
+local LocalPlayer = Players.LocalPlayer
 
-local window = AxionLib.new({
-	Title = "DemoHub",
-	Subtitle = "v1",
-	Home = {
-		Actions = {
-			{
-				Label = "Say Hi",
-				Icon = "zap",
-				Width = 94,
-				Callback = function()
-					window:Notify("Hello!", window.theme.good)
-				end,
-			},
-			{
-				Label = "Copy Link",
-				Icon = "link",
-				Width = 110,
-				Callback = function()
-					if setclipboard then
-						setclipboard(("https://roblox.com/games/%d"):format(game.PlaceId))
-						window:Notify("Copied game link", window.theme.good)
-					end
-				end,
-			},
-		},
-	},
-	Tabs = {
-		{ Id = "SETTINGS", Icon = "settings", Label = "Settings", Desc = "options" },
-	},
+-- Create the window using the library
+local Hub = AxionLib:CreateWindow({
+    Name = "Axion Demo",
+    Subtitle = "Player Inspector",
+    Version = "v1.0",
+    Loading = true,
+    AutoReady = true,
+    ToggleKey = "RightShift",
+
+    ConfigFolder = "AxionDemo",
+
+    Theme = {
+        accentBlue = Color3.fromRGB(84, 38, 232),
+        accentPink = Color3.fromRGB(172, 44, 248),
+    },
 })
 
-window:SetStatus("● ready")
+if not Hub then
+    warn("[AxionDemo] Window creation failed")
+    return
+end
 
---// Settings page --------------------------------------------------------------
-
-local settings = window:GetPage("SETTINGS")
-local settingsCard = window:Card(settings, UDim2.new(1, -36, 0, 150), UDim2.new(0, 18, 0, 16))
-
-window:AddToggle(settingsCard, 6, "UI Sounds", window.soundsEnabled, function(value)
-	window.soundsEnabled = value
-end, "sound")
-
-window:AddSlider(settingsCard, 56, "Demo Value", {
-	min = 0,
-	max = 100,
-	default = 50,
-	suffix = "%",
-	onChange = function(value)
-		window:SetStatus(("● value: %d%%"):format(value))
-	end,
+-- Dashboard tab
+local Dashboard = Hub:AddTab({
+    Name = "Dashboard",
+    Description = "Overview and status",
+    Icon = "layout-dashboard",
 })
+
+Dashboard:AddSection({
+    Name = "Welcome",
+})
+
+Dashboard:AddParagraph({
+    Title = "AxionLib is running",
+    Text = "This demo uses the original AxionLib window, tabs, theme and notifications.",
+})
+
+Dashboard:AddButton({
+    Name = "Test Notification",
+    Description = "Send a demo notification",
+    Callback = function()
+        Hub:Notify("AxionLib is working!", "good")
+    end,
+})
+
+Dashboard:AddButton({
+    Name = "Show Player Info",
+    Description = "Display your current character status",
+    Callback = function()
+        local Character = LocalPlayer.Character
+        local Humanoid = Character
+            and Character:FindFirstChildOfClass("Humanoid")
+
+        if not Humanoid then
+            Hub:Notify("Character not found", "bad")
+            return
+        end
+
+        Hub:Notify(
+            string.format(
+                "Health: %d | Speed: %d",
+                math.floor(Humanoid.Health),
+                math.floor(Humanoid.WalkSpeed)
+            ),
+            "good"
+        )
+    end,
+})
+
+-- Player tab
+local PlayerTab = Hub:AddTab({
+    Name = "Player",
+    Description = "Character test controls",
+    Icon = "users",
+})
+
+PlayerTab:AddSection({
+    Name = "Movement",
+})
+
+PlayerTab:AddSlider({
+    Name = "WalkSpeed",
+    Description = "Local character movement test",
+    Min = 8,
+    Max = 32,
+    Default = 16,
+    Increment = 1,
+    Callback = function(Value)
+        local Character = LocalPlayer.Character
+        local Humanoid = Character
+            and Character:FindFirstChildOfClass("Humanoid")
+
+        if Humanoid then
+            Humanoid.WalkSpeed = Value
+        end
+    end,
+})
+
+PlayerTab:AddButton({
+    Name = "Reset WalkSpeed",
+    Description = "Restore the default speed",
+    Callback = function()
+        local Character = LocalPlayer.Character
+        local Humanoid = Character
+            and Character:FindFirstChildOfClass("Humanoid")
+
+        if Humanoid then
+            Humanoid.WalkSpeed = 16
+            Hub:Notify("WalkSpeed reset to 16", "good")
+        end
+    end,
+})
+
+-- Settings tab
+local Settings = Hub:AddTab({
+    Name = "Settings",
+    Description = "Demo preferences",
+    Icon = "settings",
+})
+
+Settings:AddSection({
+    Name = "Interface",
+})
+
+Settings:AddButton({
+    Name = "Test UI Sound",
+    Description = "Play a built-in library sound",
+    Callback = function()
+        AxionLib:PlaySound("Click")
+        Hub:Notify("UI sound requested", "muted")
+    end,
+})
+
+Settings:AddButton({
+    Name = "Minimize / Restore",
+    Description = "Toggle the AxionLib window",
+    Callback = function()
+        Hub:Toggle()
+    end,
+})
+
+Settings:AddButton({
+    Name = "Close Demo",
+    Description = "Destroy the window and its connections",
+    Callback = function()
+        Hub:Destroy()
+    end,
+})
+
+Hub:Notify("Axion Demo loaded successfully", "good")
