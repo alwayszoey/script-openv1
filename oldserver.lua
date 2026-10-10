@@ -1,7 +1,7 @@
 --[[
     Old Server Rejoin
     Author  : @alwayszoey
-    Version : 1.0.0
+    Version : 1.1.0
     Lib     : AxionLib v2.0.0
     Icons   : Icons.lua (dist)
 ]]
@@ -20,6 +20,8 @@ local PLACE_VERSION   = game.PlaceVersion
 local CONFIG_NAME     = "oldserver"
 local SCAN_PAGE_SIZE  = 100
 local SCAN_MAX_PAGES  = 20
+
+local LOGO_URL = "https://raw.githubusercontent.com/alwayszoey/script-openv1/refs/heads/main/assets/Untitled27_20261009042444.png"
 
 local State = {
     scanning = false,
@@ -328,8 +330,9 @@ LoadConfig()
 local Window = AxionLib:createWindow({
     title     = "Old Server Rejoin",
     subtitle  = "AxionLib v" .. AxionLib.version .. "  •  Place v" .. tostring(PLACE_VERSION),
+    logoUrl   = LOGO_URL,
     toggleKey = Enum.KeyCode.RightShift,
-    theme     = "Crimson",
+    theme     = "Purple",
 })
 
 local RejoinTab = Window:addTab({
